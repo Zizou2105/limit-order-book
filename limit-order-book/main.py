@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 import logging
 from order_book_logic import OrderBook, Order, Side, datetime
@@ -8,6 +8,8 @@ import asyncio
 import random
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List, Dict
+import json
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,6 +19,59 @@ logger = logging.getLogger(__name__)
 logger.info("Creating global OrderBook instance...")
 lob = OrderBook(history_limit=200)
 logger.info("Global OrderBook instance created.")
+
+# --- WebSocket Manager ---
+class WebSocketManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        logger.info("WebSocketManager initialized")
+
+    async def connect(self, websocket: WebSocket):
+        try:
+            await websocket.accept()
+            self.active_connections.append(websocket)
+            logger.info(f"New WebSocket connection accepted. Total connections: {len(self.active_connections)}")
+            # Send initial welcome message and current order book state
+            snapshot = lob.get_order_book_snapshot(levels=15)
+            logger.info(f"Sending initial order book snapshot: {snapshot}")
+            await websocket.send_json({
+                "type": "connection_established",
+                "message": "WebSocket connection established successfully",
+                "initial_state": snapshot
+            })
+        except Exception as e:
+            logger.error(f"Error accepting WebSocket connection: {e}", exc_info=True)
+            raise
+
+    def disconnect(self, websocket: WebSocket):
+        try:
+            self.active_connections.remove(websocket)
+            logger.info(f"WebSocket connection removed. Remaining connections: {len(self.active_connections)}")
+        except ValueError:
+            logger.warning("Attempted to remove non-existent WebSocket connection")
+        except Exception as e:
+            logger.error(f"Error removing WebSocket connection: {e}", exc_info=True)
+
+    async def broadcast(self, message: dict):
+        if not self.active_connections:
+            logger.debug("No active WebSocket connections to broadcast to")
+            return
+
+        logger.info(f"Broadcasting message to {len(self.active_connections)} connections: {message}")
+        dead_connections = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+                logger.debug(f"Successfully sent message to connection")
+            except Exception as e:
+                logger.error(f"Error broadcasting to WebSocket: {e}", exc_info=True)
+                dead_connections.append(connection)
+
+        for dead_connection in dead_connections:
+            self.disconnect(dead_connection)
+
+# Initialize WebSocket manager
+ws_manager = WebSocketManager()
 
 # --- Simulator Logic ---
 async def run_direct_lob_simulator():
@@ -40,12 +95,31 @@ async def run_direct_lob_simulator():
             client_name = random.choice(client_names)
 
             logger.info(f"DirectSim placing: {client_name} {side.name} {order_volume}@{order_price:.2f}")
-            lob.place_order(client_name, side, order_price, order_volume)
+            order_id, trades = lob.place_order(client_name, side, order_price, order_volume)
+            
+            # Broadcast order book update after each order
+            snapshot = lob.get_order_book_snapshot(levels=15)
+            await ws_manager.broadcast({
+                "type": "order_book_update",
+                "data": snapshot
+            })
+
+            if trades:
+                await ws_manager.broadcast({
+                    "type": "trades",
+                    "data": trades
+                })
 
             if random.random() < 0.05 and lob.order_map:
                  order_id_to_cancel = random.choice(list(lob.order_map.keys()))
                  logger.info(f"DirectSim cancelling: {order_id_to_cancel}")
                  lob.cancel_order(order_id_to_cancel)
+                 # Broadcast order book update after cancellation
+                 snapshot = lob.get_order_book_snapshot(levels=15)
+                 await ws_manager.broadcast({
+                     "type": "order_book_update",
+                     "data": snapshot
+                 })
 
         except asyncio.CancelledError:
              logger.info("Direct LOB simulator task cancelled.")
@@ -144,6 +218,19 @@ async def create_order(order_request: OrderRequest):
             volume=order_request.volume
         )
         logger.info(f"Order {new_order_id} processed. Trades executed: {len(trades)}")
+        
+        # Get updated order book snapshot
+        snapshot = lob.get_order_book_snapshot(levels=15)
+        logger.info(f"Order book snapshot after order placement: {snapshot}")
+        
+        # Broadcast order book update
+        await ws_manager.broadcast({
+            "type": "order_book_update",
+            "data": snapshot,
+            "order_id": new_order_id,
+            "trades": trades
+        })
+        
         return PlaceOrderResponse(
             message="Order received and processed.",
             order_id=new_order_id,
@@ -165,6 +252,17 @@ async def delete_order(order_id: int):
 
         if success:
             logger.info(f"Order {order_id} cancellation processed successfully.")
+            # Get updated order book snapshot
+            snapshot = lob.get_order_book_snapshot(levels=15)
+            logger.info(f"Order book snapshot after cancellation: {snapshot}")
+            
+            # Broadcast order book update
+            await ws_manager.broadcast({
+                "type": "order_book_update",
+                "data": snapshot,
+                "cancelled_order_id": order_id
+            })
+            
             return CancelOrderResponse(message="Order cancelled successfully.", order_id=order_id)
         else:
             logger.warning(f"Order {order_id} not found or could not be cancelled.")
@@ -197,6 +295,39 @@ async def get_price_history_data():
     except Exception as e:
         logger.error(f"Error retrieving price history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error retrieving price history.")
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    logger.info("New WebSocket connection request received")
+    try:
+        await ws_manager.connect(websocket)
+        logger.info("WebSocket connection established successfully")
+        
+        while True:
+            try:
+                # Receive and handle messages
+                data = await websocket.receive_text()
+                logger.debug(f"Received message: {data}")
+                
+                try:
+                    message = json.loads(data)
+                    if message.get("type") == "ping":
+                        logger.debug("Received ping, sending pong")
+                        await websocket.send_json({"type": "pong"})
+                except json.JSONDecodeError:
+                    logger.warning(f"Received non-JSON message: {data}")
+                
+            except WebSocketDisconnect:
+                logger.info("WebSocket client disconnected")
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket connection: {e}", exc_info=True)
+                break
+    except Exception as e:
+        logger.error(f"Error establishing WebSocket connection: {e}", exc_info=True)
+    finally:
+        ws_manager.disconnect(websocket)
+        logger.info("WebSocket connection cleanup complete")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
