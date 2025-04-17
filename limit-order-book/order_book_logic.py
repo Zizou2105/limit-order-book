@@ -25,13 +25,13 @@ class Order:
                 f"Price={self.price:.2f}, Vol={self.volume}, TS={self.timestamp})")
 
 class OrderBook:
-    def __init__(self):
+    def __init__(self, history_limit: int = 200):
         # Heaps store: (price_key, queue_object)
         self.asks_heap = [] # Min-heap: (price, deque)
         self.bids_heap = [] # Max-heap: (-price, deque)
 
         # Maps
-        self.order_map = {} # {order_id: order_object} - Still needed
+        self.order_map = {} # {order_id: order_object}
 
         # Key: (price, side), Value: deque object containing Orders
         self.queue_map = {}
@@ -40,12 +40,35 @@ class OrderBook:
 
         self._order_id_counter = 1
         self.trade_log = []
+        
+        self.price_history = deque(maxlen=history_limit) # Use deque with maxlen for limited history
+        self.last_recorded_mid_price = None
 
     def _generate_order_id(self) -> int:
         """Generates a unique sequential order ID."""
         order_id = self._order_id_counter
         self._order_id_counter += 1
         return order_id
+    
+    def _update_price_history(self):
+        """Calculates mid-price and adds to history if changed."""
+        best_bid = self.get_best_bid() # Uses the method with lazy cleanup
+        best_ask = self.get_best_ask() # Uses the method with lazy cleanup
+
+        mid_price = None
+        if best_bid is not None and best_ask is not None:
+            mid_price = round((best_bid + best_ask) / 2.0, 2) # Calculate mid-price
+        elif best_bid is not None:
+             mid_price = best_bid # Use best bid if no ask
+        elif best_ask is not None:
+             mid_price = best_ask # Use best ask if no bid
+
+        # Only record if price exists and is different from the last recorded one
+        if mid_price is not None and mid_price != self.last_recorded_mid_price:
+             now = datetime.datetime.now()
+             self.price_history.append((now.timestamp() * 1000, mid_price)) # Store as (JS timestamp ms, price)
+             self.last_recorded_mid_price = mid_price
+             logger.debug(f"Price History Updated: ({now.timestamp()*1000}, {mid_price})")
     
     def _add_order_to_book(self, order: Order):
         """Adds an order to the corresponding price queue and updates structures."""
@@ -178,6 +201,8 @@ class OrderBook:
             if order_id in self.order_map:
                 del self.order_map[order_id]
 
+        self._update_price_history()
+
         return order_id, trades_executed_by_this_order
 
     def get_volume_at_price(self, price: float, side: Side) -> int:
@@ -186,51 +211,101 @@ class OrderBook:
          return self.volume_map.get(map_key, 0)
 
 
-    def cancel_order(self, order_id: int):
+# order_book_logic.py
+
+# ... (imports, Side, Order, OrderBook __init__ with self.price_history, _generate_order_id, _update_price_history ) ...
+
+# Keep your existing cancel_order logic, just add one line at the end
+
+    def cancel_order(self, order_id: int) -> bool: # Added return type hint
         """Actively removes an order from its queue and updates structures (Phase 2)."""
         if order_id not in self.order_map:
-            print(f"Cancel failed: Order {order_id} not found.")
+            # Use logger if available, otherwise print
+            logger.warning(f"Cancel failed: Order {order_id} not found.")
             return False
-        
+
         order_to_cancel = self.order_map[order_id]
 
-        if order_to_cancel.volume == 0:
-             print(f"Cancel failed: Order {order_id} seems already filled (volume is 0).")
+        # Check if already filled (it shouldn't be in map if truly filled, but defensive)
+        if order_to_cancel.volume <= 0:
+             logger.warning(f"Cancel failed: Order {order_id} has zero volume (already filled?).")
+             # Clean up map just in case
+             if order_id in self.order_map: del self.order_map[order_id]
              return False
+
         price = order_to_cancel.price
         side = order_to_cancel.side
         map_key = (price, side)
-        price_key = price if side == Side.SELL else -price
-        heap = self.asks_heap if side == Side.SELL else self.bids_heap
+        # price_key = price if side == Side.SELL else -price # Not needed for removal logic itself
+        # heap = self.asks_heap if side == Side.SELL else self.bids_heap # Not needed for removal logic itself
 
-        print(f"Attempting active cancel for Order {order_id} at {map_key}")
+        logger.info(f"Attempting active cancel for Order {order_id} at {map_key}")
 
+        original_volume = order_to_cancel.volume # Store volume before setting to 0 or removing
+
+        # 1. Update Volume Map *before* potential errors removing from queue
+        volume_updated = False
         if map_key in self.volume_map:
-            self.volume_map[map_key] -= order_to_cancel.volume
-            print(f" Volume map updated for {map_key}: New total vol = {self.volume_map[map_key]}")
+            self.volume_map[map_key] -= original_volume # Use stored volume
+            volume_updated = True
+            logger.info(f" Volume map updated for {map_key}: New total vol = {self.volume_map.get(map_key, 0)}")
             if self.volume_map[map_key] <= 0:
-                print(f" Volume for {map_key} reached 0, removing from volume_map.")
+                logger.info(f" Volume for {map_key} reached 0, removing from volume_map.")
                 del self.volume_map[map_key]
         else:
-             print(f"Warning: Cannot find volume map entry for {map_key} during cancel.")
+             logger.warning(f"Cannot find volume map entry {map_key} during cancel for order {order_id}.")
 
-        if map_key in self.queue_map:
+
+        # 2. Remove Order from Queue
+        queue_exists = map_key in self.queue_map
+        queue_removed = False
+        queue_became_empty = False
+        if queue_exists:
             queue = self.queue_map[map_key]
-
             try:
+                # NOTE: deque.remove(value) is O(N). DLL opt needed for O(1).
                 queue.remove(order_to_cancel)
-                print(f" Order {order_id} removed from queue for {map_key}.")
-                if not queue:
-                    print(f" Queue for {map_key} is now empty. Removing from queue_map.")
-                    del self.queue_map[map_key]
-            except ValueError:
-                print(f"Warning: Order {order_id} not found in its expected queue {map_key}.")
-        else:
-             print(f"Warning: Cannot find queue map entry for {map_key} during cancel.")
+                queue_removed = True
+                logger.info(f" Order {order_id} removed from queue for {map_key}.")
 
-        del self.order_map[order_id]
-        print(f" Order {order_id} removed from order_map.")
-        return True
+                # 3. If Queue is now empty, remove from queue_map (Heap removal remains lazy)
+                if not queue:
+                    queue_became_empty = True
+                    logger.info(f" Queue for {map_key} is now empty. Removing from queue_map.")
+                    del self.queue_map[map_key]
+                    # Heap cleanup is handled by get_best_bid/ask or matching logic
+                    logger.info(f" NOTE: Price level {map_key} relies on lazy removal from heap.")
+
+            except ValueError:
+                # This means the order wasn't in the queue it was expected to be in.
+                # This could happen if it was filled by another thread between check and here (in real world)
+                # Or if state is inconsistent.
+                logger.error(f"CRITICAL WARNING: Order {order_id} in order_map but NOT FOUND in its expected queue {map_key} during cancel!")
+                # Should we still proceed with removing from order_map? Yes, probably.
+                # Should we revert volume_map change? Maybe, depends on desired consistency level.
+                # For now, we proceed but log severity.
+        else:
+             logger.warning(f"Cannot find queue map entry {map_key} during cancel for order {order_id}.")
+
+        # 4. Remove Order from Order Map (Always attempt this if found initially)
+        if order_id in self.order_map:
+            del self.order_map[order_id]
+            logger.info(f" Order {order_id} removed from order_map.")
+        else:
+            # This case should ideally not happen if initial check passed and no errors above
+             logger.warning(f"Order {order_id} missing from order_map at end of cancel function.")
+
+
+        # --- ADD HISTORY UPDATE ---
+        # Update price history if the cancellation likely changed the book state
+        # (e.g., if volume was successfully updated or queue became empty)
+        if volume_updated or queue_became_empty:
+            self._update_price_history()
+        # --- End History Update ---
+
+        # Return True if we at least removed it from the order map
+        # A more robust check might verify queue_removed is True
+        return True # Assuming if we got here, the cancel was intended and mostly processed
 
 
     def get_best_bid(self) -> float | None:

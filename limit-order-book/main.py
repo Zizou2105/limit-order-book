@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # --- Global OrderBook Instance ---
 logger.info("Creating global OrderBook instance...")
-lob = OrderBook()
+lob = OrderBook(history_limit=200)
 logger.info("Global OrderBook instance created.")
 
 # --- Simulator Logic ---
@@ -116,6 +116,13 @@ class LobSnapshotResponse(BaseModel):
     bids: list[LobLevel]
     asks: list[LobLevel]
 
+class PriceHistoryPoint(BaseModel):
+    timestamp: float # JS timestamp (milliseconds)
+    price: float
+
+class PriceHistoryResponse(BaseModel):
+    history: list[PriceHistoryPoint]
+
 @app.get("/")
 async def read_root():
     """Basic root endpoint to check if the API is running."""
@@ -178,6 +185,18 @@ async def get_lob_snapshot(levels: int = Query(5, ge=1, le=50, description="Numb
     except Exception as e:
         logger.error(f"Error retrieving LOB snapshot: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error retrieving order book snapshot.")
+
+@app.get("/price_history", response_model=PriceHistoryResponse)
+async def get_price_history_data():
+    """Retrieves the recent mid-price history from the simulator."""
+    try:
+        history_tuples = lob.price_history
+        # Convert list of tuples to list of dictionaries/Pydantic models
+        history_data = [{"timestamp": ts, "price": p} for ts, p in history_tuples]
+        return PriceHistoryResponse(history=history_data)
+    except Exception as e:
+        logger.error(f"Error retrieving price history: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error retrieving price history.")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
