@@ -1,0 +1,222 @@
+body {
+  font-family: sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f4f7f6;
+  color: #333;
+}
+
+.App {
+  max-width: 1200px;
+  margin: 20px auto;
+  padding: 20px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+h1, h2 {
+  text-align: center;
+  color: #2c3e50;
+  margin-bottom: 20px;
+}
+
+h1 {
+    margin-bottom: 30px;
+}
+
+/* Main LOB Container */
+.lob-container {
+  display: flex; /* Use flexbox to arrange bid/ask side-by-side */
+  justify-content: space-around; /* Distribute space */
+  flex-wrap: wrap; /* Allow wrapping on smaller screens */
+  margin-bottom: 30px;
+  gap: 20px; /* Space between bid/ask columns */
+  border-bottom: 1px solid #eee;
+  padding-bottom: 20px;
+}
+
+.lob-side {
+  flex: 1; /* Each side takes up equal space */
+  min-width: 280px; /* Minimum width before wrapping */
+  padding: 15px;
+  border: 1px solid #e0e0e0;
+  border-radius: 5px;
+  background-color: #fdfdfd;
+}
+
+.lob-side h2 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-size: 1.2em;
+  border-bottom: 2px solid;
+  padding-bottom: 5px;
+}
+
+.asks h2 {
+  color: #e74c3c; /* Red for asks/sellers */
+  border-bottom-color: #e74c3c;
+}
+
+.bids h2 {
+  color: #2ecc71; /* Green for bids/buyers */
+  border-bottom-color: #2ecc71;
+}
+
+/* Order Book Table Styling */
+.lob-side table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.lob-side th, .lob-side td {
+  padding: 8px 12px;
+  text-align: right;
+  border-bottom: 1px solid #eee;
+}
+
+.lob-side th {
+  background-color: #ecf0f1;
+  font-weight: bold;
+  color: #555;
+}
+
+.lob-side tr:last-child td {
+    border-bottom: none;
+}
+
+/* Highlight Best Bid/Ask Rows (Optional - requires logic change in React to identify) */
+/* Example - you would add a class name in React */
+.lob-side tr.best-ask td {
+    background-color: rgba(231, 76, 60, 0.1); /* Light red */
+    font-weight: bold;
+}
+.lob-side tr.best-bid td {
+    background-color: rgba(46, 204, 113, 0.1); /* Light green */
+    font-weight: bold;
+}
+
+/* Order Entry Form */
+.order-entry {
+  margin-top: 30px;
+  padding: 20px;
+  border: 1px solid #e0e0e0;
+  border-radius: 5px;
+  background-color: #f9f9f9;
+  margin-bottom: 30px;
+}
+
+.order-entry h2 {
+  margin-top: 0;
+  font-size: 1.2em;
+  color: #34495e;
+}
+
+.order-entry form div {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.order-entry label {
+  flex-basis: 80px; /* Fixed width for labels */
+  text-align: right;
+  font-weight: bold;
+  color: #555;
+}
+
+.order-entry input[type="text"],
+.order-entry input[type="number"],
+.order-entry select {
+  flex-grow: 1; /* Input takes remaining space */
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1em;
+}
+
+.order-entry button {
+  display: block; /* Make button take full width */
+  width: 100%;
+  padding: 12px 20px;
+  background-color: #3498db; /* Blue submit button */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1.1em;
+  transition: background-color 0.2s ease;
+}
+
+.order-entry button:hover {
+  background-color: #2980b9;
+}
+
+/* Trade Log */
+.trade-log {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+}
+
+.trade-log h2 {
+    font-size: 1.2em;
+    color: #8e44ad; /* Purple for trades */
+}
+
+.trade-log ul {
+    list-style-type: none;
+    padding: 0;
+    max-height: 200px; /* Limit height and make scrollable */
+    overflow-y: auto;
+    font-size: 0.9em;
+    line-height: 1.5;
+    border: 1px solid #eee;
+    padding: 10px;
+    border-radius: 4px;
+    background-color: #fdfdfd;
+}
+
+.trade-log li {
+    padding: 4px 0;
+    border-bottom: 1px dashed #eee;
+}
+.trade-log li:last-child {
+    border-bottom: none;
+}
+
+/* Error Message Styling */
+.error {
+    color: #c0392b; /* Red for errors */
+    background-color: #fdd;
+    border: 1px solid #c0392b;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+/* Loading Styling */
+.App p {
+    text-align: center;
+    font-style: italic;
+    color: #777;
+}
+
+/* Basic Responsive Adjustments */
+@media (max-width: 600px) {
+  .lob-container {
+    flex-direction: column; /* Stack bid/ask vertically */
+  }
+  .order-entry form div {
+      flex-direction: column;
+      align-items: stretch;
+  }
+   .order-entry label {
+      text-align: left;
+      margin-bottom: 5px;
+      flex-basis: auto;
+   }
+}
