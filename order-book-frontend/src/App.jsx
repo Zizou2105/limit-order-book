@@ -171,26 +171,53 @@ function App() {
                 
                 data.trades.forEach(trade => {
                   console.log('Processing trade:', trade);
-                  const tradeInfo = trade.split(' ');
-                  const orderId = parseInt(tradeInfo.find(info => info.startsWith('ID:')).split(':')[1]);
-                  const volume = parseInt(tradeInfo[0]);
-                  const price = parseFloat(tradeInfo[3]);
                   
-                  console.log(`Trade details - Order ID: ${orderId}, Volume: ${volume}, Price: ${price}`);
+                  // Improved trade parsing
+                  const tradeMatch = trade.match(/Trade Executed: (\d+) shares @ (\d+\.\d+) \(Incoming: .* ID:(\d+), Resting: .* ID:(\d+)\)/);
+                  if (!tradeMatch) {
+                    console.error('Failed to parse trade message:', trade);
+                    return;
+                  }
+                  
+                  const [, volume, price, incomingOrderId, restingOrderId] = tradeMatch;
+                  const parsedVolume = parseInt(volume);
+                  const parsedPrice = parseFloat(price);
+                  const parsedOrderId = parseInt(incomingOrderId);
+                  
+                  console.log('Parsed trade details:', {
+                    volume: parsedVolume,
+                    price: parsedPrice,
+                    orderId: parsedOrderId,
+                    rawTrade: trade
+                  });
+                  
+                  // Add trade price to price history
+                  setPriceHistory(prevHistory => {
+                    const newHistory = [...prevHistory, {
+                      timestamp: Date.now(),
+                      price: parsedPrice,
+                      isTrade: true
+                    }];
+                    console.log('Updated price history with trade:', {
+                      newPrice: parsedPrice,
+                      historyLength: newHistory.length
+                    });
+                    return newHistory.slice(-MAX_PRICE_HISTORY);
+                  });
                   
                   setClientOrders(prevOrders => {
                     console.log('Current client orders:', prevOrders);
                     const updatedOrders = prevOrders.map(order => {
-                      if (order.order_id === orderId) {
+                      if (order.order_id === parsedOrderId) {
                         console.log(`Found matching order: ${order.order_id}`);
-                        const remainingVolume = order.volume - volume;
+                        const remainingVolume = order.volume - parsedVolume;
                         if (remainingVolume > 0) {
-                          console.log(`Order ${orderId} partially filled. Remaining volume: ${remainingVolume}`);
-                          toast.info(`Order ${orderId} partially filled: ${volume} @ ${price}`);
+                          console.log(`Order ${parsedOrderId} partially filled. Remaining volume: ${remainingVolume}`);
+                          toast.info(`Order ${parsedOrderId} partially filled: ${parsedVolume} @ ${parsedPrice}`);
                           return { ...order, volume: remainingVolume };
                         } else {
-                          console.log(`Order ${orderId} fully filled`);
-                          toast.success(`Order ${orderId} fully filled: ${volume} @ ${price}`);
+                          console.log(`Order ${parsedOrderId} fully filled`);
+                          toast.success(`Order ${parsedOrderId} fully filled: ${parsedVolume} @ ${parsedPrice}`);
                           return null;
                         }
                       }
