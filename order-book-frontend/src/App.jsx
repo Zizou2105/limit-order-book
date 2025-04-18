@@ -3,8 +3,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import SimulatorChart from './components/SimulatorChart'; // Uses Lightweight Charts now
 import OrderBookDisplay from './components/OrderBookDisplay';
 import OrderEntryForm from './components/OrderEntryForm';
+import ClientOrders from './components/ClientOrders';
 import RecentTrades from './components/RecentTrades';
 import './App.css'; // Your main CSS
+import { toast, ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 // Ensure fallback works if ENV var isn't set during local dev
 const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
@@ -18,6 +21,8 @@ function App() {
   const [priceHistory, setPriceHistory] = useState([]); // State for chart data
   const [isLoading, setIsLoading] = useState(true); // Combined loading state
   const [error, setError] = useState(null); // Combined error state
+  const [clientOrders, setClientOrders] = useState([]);
+  const [currentClient, setCurrentClient] = useState('ReactClient');
   const wsRef = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
@@ -57,95 +62,75 @@ function App() {
     // Only update when bids or asks change
   }, [bids, asks]);
 
-  // WebSocket connection management - Revised Logic Attempt 3
+  // WebSocket connection management
   useEffect(() => {
-    let wsInstance = null; // Local variable for the WebSocket instance in this effect run
+    let wsInstance = null;
     let pingIntervalId = null;
-    let isActive = true; // Flag for this effect instance
-    let connectTimeoutId = null; // To manage reconnection timeouts
+    let isActive = true;
+    let connectTimeoutId = null;
 
     const cleanup = () => {
-        console.log('Cleanup called.');
-        isActive = false; 
-        if (pingIntervalId) {
-            clearInterval(pingIntervalId);
-            pingIntervalId = null;
-            console.log("Ping interval cleared.");
-        }
-        if (connectTimeoutId) {
-            clearTimeout(connectTimeoutId);
-            connectTimeoutId = null;
-             console.log("Reconnect timeout cleared.");
-        }
-        // Critical: Only close the WS instance associated with *this* effect run.
-        if (wsInstance) {
-            console.log(`Cleanup: Attempting to close WS instance (readyState: ${wsInstance.readyState})`);
-            // Avoid closing if already closed/closing
-            if (wsInstance.readyState === WebSocket.OPEN || wsInstance.readyState === WebSocket.CONNECTING) {
-                try {
-                    wsInstance.close(1000, "Component unmounting"); // Close with code 1000
-                    console.log("Cleanup: wsInstance.close() called.");
-                } catch (e) {
-                    console.warn('Cleanup: Error closing WebSocket:', e);
-                }
-            } else {
-                 console.log("Cleanup: wsInstance already closed or closing.");
-            }
-            // If this instance is the one in the ref, clear the ref. 
-            // This is important so the next effect run doesn't see a stale ref.
-            if (wsRef.current === wsInstance) {
-                 console.log("Cleanup: Clearing wsRef as it matched the instance being cleaned up.");
-                 wsRef.current = null;
-            }
-        } else {
-             console.log("Cleanup: No wsInstance for this effect run.");
-        }
-         console.log('Cleanup finished.');
+      console.log('Cleanup called.');
+      isActive = false;
+      
+      if (pingIntervalId) {
+        clearInterval(pingIntervalId);
+        pingIntervalId = null;
+      }
+      
+      if (connectTimeoutId) {
+        clearTimeout(connectTimeoutId);
+        connectTimeoutId = null;
+      }
+      
+      if (wsInstance && (wsInstance.readyState === WebSocket.OPEN || wsInstance.readyState === WebSocket.CONNECTING)) {
+        console.log(`Cleanup: Closing WS instance (readyState: ${wsInstance.readyState})`);
+        wsInstance.close(1000, "Component unmounting");
+      }
+      
+      if (wsRef.current === wsInstance) {
+        wsRef.current = null;
+      }
     };
 
     const connect = () => {
-      // If a connection (from this or another effect run) is already open/connecting, do nothing.
+      if (!isActive) {
+        console.log('Connect skipped: Effect instance is no longer active');
+        return;
+      }
+
       if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
         console.log(`Connect skipped: Existing connection state is ${wsRef.current.readyState}`);
-        // If it's open, ensure loading is false (might have been set true by a previous failed attempt)
         if (wsRef.current.readyState === WebSocket.OPEN) setIsLoading(false);
         return;
       }
-      // Prevent connection if this effect instance is no longer active
-      if (!isActive) {
-         console.log(`Connect skipped: Effect instance is no longer active.`);
-         return;
-      }
 
       console.log(`Attempting WebSocket connection to ${WS_URL} (Attempt ${reconnectAttempts.current + 1}/${maxReconnectAttempts})`);
-      setIsLoading(true); // Set loading true when attempting connection
-      setError(null); // Clear previous errors
+      setIsLoading(true);
+      setError(null);
 
       try {
         wsInstance = new WebSocket(WS_URL);
-        wsRef.current = wsInstance; // Assign to ref immediately
-        console.log("New WebSocket instance created and assigned to wsRef.");
+        wsRef.current = wsInstance;
 
         wsInstance.onopen = () => {
-          // Check if this instance is still the active one in the ref AND the effect is active
           if (!isActive || wsInstance !== wsRef.current) {
-            console.log("onopen: Instance mismatch or effect inactive. Closing this instance.");
-            if (wsInstance.readyState === WebSocket.OPEN) wsInstance.close();
+            console.log("onopen: Instance mismatch or effect inactive. Closing connection.");
+            wsInstance.close();
             return;
           }
-          console.log('onopen: WebSocket connection established successfully');
-          reconnectAttempts.current = 0; // Reset on successful connection
-          setIsLoading(false); // Set loading false on open
+          
+          console.log('WebSocket connection established successfully');
+          reconnectAttempts.current = 0;
+          setIsLoading(false);
           setError(null);
 
           // Setup ping
-          if (pingIntervalId) clearInterval(pingIntervalId); // Clear any previous interval
+          if (pingIntervalId) clearInterval(pingIntervalId);
           pingIntervalId = setInterval(() => {
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              console.log('Sending ping');
               wsRef.current.send(JSON.stringify({ type: 'ping' }));
             } else {
-              console.log('Ping interval: WebSocket not open, clearing interval.');
               clearInterval(pingIntervalId);
               pingIntervalId = null;
             }
@@ -153,117 +138,127 @@ function App() {
         };
 
         wsInstance.onmessage = (event) => {
-          // Log message *before* checking activity/instance match
-          console.log('[Raw WS Message]:', event.data);
           if (!isActive || wsInstance !== wsRef.current) {
-            console.log("onmessage: Instance mismatch or effect inactive. Ignoring.");
+            console.log("onmessage: Instance mismatch or effect inactive. Ignoring message.");
             return;
           }
-          // Proceed with parsing and state updates...
+
           try {
             const data = JSON.parse(event.data);
-            console.log('Parsed WebSocket data:', data);
-            switch (data.type) {
-              case 'connection_established':
-                console.log('Server confirmed connection:', data.message);
-                if (data.initial_state) {
-                  console.log('Received initial order book state:', data.initial_state);
-                  // Sort initial state before setting
-                  const initialBids = (data.initial_state.bids || []).sort((a, b) => b.price - a.price);
-                  const initialAsks = (data.initial_state.asks || []).sort((a, b) => a.price - b.price);
-                  setBids(initialBids);
-                  setAsks(initialAsks);
-                  logStateChange('bids', initialBids);
-                  logStateChange('asks', initialAsks);
-                }
-                break;
-              case 'order_book_update':
-                console.log('Updating order book with new data:', data.data);
-                // Ensure bids/asks are sorted correctly after update
-                const newBids = (data.data.bids || []).sort((a, b) => b.price - a.price);
-                const newAsks = (data.data.asks || []).sort((a, b) => a.price - b.price);
-                console.log('New bids:', newBids);
-                console.log('New asks:', newAsks);
-                setBids(newBids);
-                setAsks(newAsks);
-                logStateChange('bids', newBids);
-                logStateChange('asks', newAsks);
+            console.log('Received WebSocket message:', data);
+
+            if (data.type === 'order_book_update') {
+              console.log('Processing order book update');
+              
+              // Update order book state
+              setBids(data.data.bids || []);
+              setAsks(data.data.asks || []);
+              
+              // Handle order cancellations
+              if (data.cancelled_order_id) {
+                console.log(`Processing order cancellation: ${data.cancelled_order_id}`);
+                setClientOrders(prevOrders => {
+                  const newOrders = prevOrders.filter(order => order.order_id !== data.cancelled_order_id);
+                  console.log('Updated client orders after cancellation:', newOrders);
+                  return newOrders;
+                });
+              }
+              
+              // Handle trades
+              if (data.trades && data.trades.length > 0) {
+                console.log('Processing trades:', data.trades);
+                setLastTrades(prevTrades => [...data.trades, ...prevTrades].slice(0, 15));
                 
-                if (data.trades && data.trades.length > 0) {
-                  console.log('New trades from order:', data.trades);
-                  setLastTrades(prevTrades => 
-                     [...data.trades, ...prevTrades].slice(0, 15)
-                  );
-                   logStateChange('lastTrades', data.trades);
-                }
-                break;
-              case 'pong':
-                console.log('Received pong response');
-                break;
-              default:
-                console.warn('Unknown message type received:', data.type);
+                data.trades.forEach(trade => {
+                  console.log('Processing trade:', trade);
+                  const tradeInfo = trade.split(' ');
+                  const orderId = parseInt(tradeInfo.find(info => info.startsWith('ID:')).split(':')[1]);
+                  const volume = parseInt(tradeInfo[0]);
+                  const price = parseFloat(tradeInfo[3]);
+                  
+                  console.log(`Trade details - Order ID: ${orderId}, Volume: ${volume}, Price: ${price}`);
+                  
+                  setClientOrders(prevOrders => {
+                    console.log('Current client orders:', prevOrders);
+                    const updatedOrders = prevOrders.map(order => {
+                      if (order.order_id === orderId) {
+                        console.log(`Found matching order: ${order.order_id}`);
+                        const remainingVolume = order.volume - volume;
+                        if (remainingVolume > 0) {
+                          console.log(`Order ${orderId} partially filled. Remaining volume: ${remainingVolume}`);
+                          toast.info(`Order ${orderId} partially filled: ${volume} @ ${price}`);
+                          return { ...order, volume: remainingVolume };
+                        } else {
+                          console.log(`Order ${orderId} fully filled`);
+                          toast.success(`Order ${orderId} fully filled: ${volume} @ ${price}`);
+                          return null;
+                        }
+                      }
+                      return order;
+                    }).filter(Boolean);
+                    
+                    console.log('Updated client orders after trade:', updatedOrders);
+                    return updatedOrders;
+                  });
+                });
+              }
             }
           } catch (e) {
-            console.error('Error parsing WebSocket message:', e);
+            console.error("Error processing WebSocket message:", e);
           }
         };
 
         wsInstance.onerror = (event) => {
-          // Error events often precede close events. Log it, but handle state in onclose.
           if (!isActive || wsInstance !== wsRef.current) {
-             console.log("onerror: Instance mismatch or effect inactive. Ignoring.");
-             return;
+            console.log("onerror: Instance mismatch or effect inactive. Ignoring error.");
+            return;
           }
-          console.error('onerror: WebSocket error occurred.'); // Keep it simple, details in console
-           // Avoid setting state here as onclose will handle it
+          console.error('WebSocket error occurred:', event);
         };
 
         wsInstance.onclose = (event) => {
-           if (!isActive || wsInstance !== wsRef.current) {
-             console.log("onclose: Instance mismatch or effect inactive. Ignoring.");
-             return;
-           }
-          console.log(`onclose: WebSocket connection closed: Code=${event.code}, Reason='${event.reason}', Clean=${event.wasClean}`);
-          
-          if (pingIntervalId) clearInterval(pingIntervalId);
-          pingIntervalId = null;
-          // Important: Clear the ref *only if* it still points to this closing instance
-          if (wsRef.current === wsInstance) {
-              wsRef.current = null;
-              console.log("onclose: wsRef cleared.");
+          if (!isActive || wsInstance !== wsRef.current) {
+            console.log("onclose: Instance mismatch or effect inactive. Ignoring close.");
+            return;
           }
 
-          // Only attempt reconnect if the close was unexpected or is a standard closure code we want to retry
-          if (isActive && event.code !== 1000 /* Normal Closure */ && reconnectAttempts.current < maxReconnectAttempts) {
+          console.log(`WebSocket connection closed: Code=${event.code}, Reason='${event.reason}', Clean=${event.wasClean}`);
+          
+          if (pingIntervalId) {
+            clearInterval(pingIntervalId);
+            pingIntervalId = null;
+          }
+
+          if (wsRef.current === wsInstance) {
+            wsRef.current = null;
+          }
+
+          if (isActive && event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
             reconnectAttempts.current += 1;
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 30000);
-            console.log(`onclose: Attempting to reconnect in ${delay}ms...`);
-            if (connectTimeoutId) clearTimeout(connectTimeoutId); // Clear previous timeout if any
-            connectTimeoutId = setTimeout(connect, delay); // Schedule reconnect
+            console.log(`Attempting to reconnect in ${delay}ms...`);
+            connectTimeoutId = setTimeout(connect, delay);
           } else if (event.code !== 1000) {
-            console.error('onclose: Max reconnection attempts reached or non-retriable close.');
+            console.error('Max reconnection attempts reached or non-retriable close.');
             setError('WebSocket connection lost. Please refresh.');
-            setIsLoading(false); // Stop loading only after max attempts or non-retriable close
+            setIsLoading(false);
           } else {
-              // Normal closure (code 1000), likely from cleanup
-              console.log('onclose: Normal closure (1000), not reconnecting.');
-              setIsLoading(false); // Ensure loading is false on normal close
+            console.log('Normal closure (1000), not reconnecting.');
+            setIsLoading(false);
           }
         };
 
       } catch (e) {
         console.error('Error creating WebSocket:', e);
         setError(`Failed to create WebSocket: ${e.message}`);
-        setIsLoading(false); // Stop loading if creation fails
-        wsRef.current = null; // Ensure ref is clear on creation error
+        setIsLoading(false);
+        wsRef.current = null;
       }
     };
 
-    connect(); // Initial connection attempt
-
-    // Return the cleanup function
+    connect();
     return cleanup;
-  }, []); // Empty dependency array
+  }, []);
 
   // Handle Order Submission (passed to OrderEntryForm)
   const handlePlaceOrderSubmit = useCallback(async (client, sideInt, price, volume) => {
@@ -273,7 +268,7 @@ function App() {
     }
     const orderData = { client, side: sideInt, price, volume };
     console.log("App sending order:", orderData);
-    setError(null); // Clear previous errors on new action
+    setError(null);
 
     try {
       const response = await fetch(`${API_URL}/order`, {
@@ -291,17 +286,71 @@ function App() {
       }
 
       console.log("App received order result:", result);
-      // Rely on WebSocket for state updates
-      return result; 
+      // Add the new order to clientOrders
+      if (result.order_id) {
+        setClientOrders(prevOrders => [...prevOrders, {
+          order_id: result.order_id,
+          client: client,
+          side: sideInt === 1 ? 'BUY' : 'SELL',
+          price: price,
+          volume: volume
+        }]);
+      }
+      return result;
     } catch (e) {
-       console.error("Error submitting order:", e);
-       setError(e.message || "Failed to submit order.");
-       throw e; // Re-throw for the form to handle
+      console.error("Error submitting order:", e);
+      setError(e.message || "Failed to submit order.");
+      throw e;
+    }
+  }, []);
+
+  // Handle Order Cancellation
+  const handleCancelOrder = useCallback(async (orderId) => {
+    if (!API_URL) {
+      setError("API URL not configured.");
+      throw new Error("API URL not configured.");
+    }
+    console.log("App cancelling order:", orderId);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/order/${orderId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        console.error("API Error Response on DELETE:", result);
+        const errorMsg = result.detail || `Order cancellation failed: ${response.status}`;
+        setError(errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      console.log("App received cancellation result:", result);
+      // Remove the cancelled order from clientOrders
+      setClientOrders(prevOrders => prevOrders.filter(order => order.order_id !== orderId));
+      return result;
+    } catch (e) {
+      console.error("Error cancelling order:", e);
+      setError(e.message || "Failed to cancel order.");
+      throw e;
     }
   }, []);
 
   return (
     <div className="App">
+      <ToastContainer 
+        position="top-right"
+        autoClose={5000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+      />
       <h1>LOB Simulator & Chart</h1>
       {/* Display general errors prominently */} 
       {error && <p className="error-text app-error">Error: {error}</p>}
@@ -323,7 +372,17 @@ function App() {
              isLoading={isLoading} // Use the unified loading state
              error={error} // Use the unified error state
            />
-          <OrderEntryForm handlePlaceOrder={handlePlaceOrderSubmit} />
+          <div className="order-forms-container">
+            <OrderEntryForm 
+              handlePlaceOrder={handlePlaceOrderSubmit} 
+              currentClient={currentClient}
+            />
+            <ClientOrders 
+              client={currentClient}
+              orders={clientOrders}
+              onCancelOrder={handleCancelOrder}
+            />
+          </div>
           <RecentTrades trades={lastTrades} />
         </div>
       </div>
