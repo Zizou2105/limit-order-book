@@ -21,9 +21,9 @@ lob = OrderBook(history_limit=200)
 logger.info("Global OrderBook instance created.")
 
 # --- Simulator Control Event ---
-logger.info("Creating simulator control event (initially active).")
+logger.info("Creating simulator control event (initially inactive).")
 simulator_active_event = asyncio.Event()
-simulator_active_event.set() # Start as active
+# simulator_active_event.set() # REMOVE: Start as inactive by default
 
 # --- WebSocket Manager ---
 class WebSocketManager:

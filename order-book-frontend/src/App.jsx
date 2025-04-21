@@ -23,7 +23,7 @@ function App() {
   const [error, setError] = useState(null); // Combined error state
   const [clientOrders, setClientOrders] = useState([]);
   const [currentClient, setCurrentClient] = useState('ReactClient');
-  const [isSimulatorActive, setIsSimulatorActive] = useState(true); // NEW: State for simulator toggle
+  const [isSimulatorActive, setIsSimulatorActive] = useState(false); // NEW: State for simulator toggle - Start OFF
   const wsRef = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
