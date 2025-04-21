@@ -1,17 +1,16 @@
 // src/components/SimulatorChart.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
-  TimeScale,
   PointElement,
   LineElement,
   Title,
   Tooltip,
   Legend,
-  Filler
+  TimeScale
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 
@@ -19,69 +18,55 @@ import 'chartjs-adapter-date-fns';
 ChartJS.register(
   CategoryScale,
   LinearScale,
-  TimeScale,
   PointElement,
   LineElement,
   Title,
   Tooltip,
   Legend,
-  Filler
+  TimeScale
 );
 
-// Accept priceHistory, isLoading, error as props
-function SimulatorChart({ priceHistory, isLoading, error }) {
-  const chartRef = useRef(null); // Ref to access the chart instance
-
-  // State for the data structure Chart.js expects
+const SimulatorChart = ({ priceHistory, isLoading, error }) => {
   const [chartData, setChartData] = useState({
+    labels: [],
     datasets: [
       {
         label: 'Mid Price',
         data: [],
-        borderColor: 'rgb(54, 162, 235)',
-        backgroundColor: 'rgba(54, 162, 235, 0.1)',
-        tension: 0.1,
-        pointRadius: 1,
-        fill: true,
-        yAxisID: 'y',
+        borderColor: 'rgb(53, 162, 235)',
+        backgroundColor: 'rgba(53, 162, 235, 0.5)',
+        borderWidth: 2,
+        tension: 0.4,
+        pointRadius: 0
       },
       {
-        label: 'Trade Price',
+        label: 'Trades',
         data: [],
         borderColor: 'rgb(255, 99, 132)',
-        backgroundColor: 'rgba(255, 99, 132, 0.1)',
-        tension: 0.1,
-        pointRadius: 3,
-        fill: false,
-        yAxisID: 'y',
+        backgroundColor: 'rgba(255, 99, 132, 0.5)',
+        borderWidth: 2,
+        pointRadius: 4,
+        pointStyle: 'circle',
+        tension: 0,
+        showLine: true
       }
     ]
   });
 
-  // Effect to update chart when priceHistory prop changes
   useEffect(() => {
-    if (!priceHistory || priceHistory.length === 0) {
-      setChartData(prevData => ({
-        ...prevData,
-        datasets: [
-          { ...prevData.datasets[0], data: [] },
-          { ...prevData.datasets[1], data: [] }
-        ]
+    if (!priceHistory || priceHistory.length === 0) return;
+
+    const midPriceData = priceHistory
+      .filter(point => !point.isTrade)
+      .map(point => ({
+        x: new Date(point.timestamp),
+        y: point.price
       }));
-      return;
-    }
 
-    // Format data for Chart.js: {x: timestamp_ms, y: price}
-    const formattedData = priceHistory.map(point => ({
-      x: point.timestamp,
-      y: point.price
-    })).sort((a, b) => a.x - b.x);
-
-    // Extract trade prices from priceHistory
     const tradeData = priceHistory
       .filter(point => point.isTrade)
       .map(point => ({
-        x: point.timestamp,
+        x: new Date(point.timestamp),
         y: point.price
       }));
 
@@ -90,7 +75,7 @@ function SimulatorChart({ priceHistory, isLoading, error }) {
       datasets: [
         {
           ...prevData.datasets[0],
-          data: formattedData
+          data: midPriceData
         },
         {
           ...prevData.datasets[1],
@@ -98,23 +83,27 @@ function SimulatorChart({ priceHistory, isLoading, error }) {
         }
       ]
     }));
-
   }, [priceHistory]);
 
   // Chart.js Options Configuration
   const options = {
     responsive: true,
     maintainAspectRatio: false,
-    animation: false,
+    animation: {
+      duration: 0 // Disable animations for better performance
+    },
     interaction: {
-      mode: 'index',
-      intersect: false,
+      mode: 'nearest',
+      axis: 'x',
+      intersect: false
     },
     plugins: {
       legend: {
         position: 'top',
-        labels: { 
-          color: '#d1d4dc',
+        align: 'center',
+        labels: {
+          usePointStyle: true,
+          padding: 20,
           font: {
             size: 12
           }
@@ -123,36 +112,13 @@ function SimulatorChart({ priceHistory, isLoading, error }) {
       title: {
         display: true,
         text: 'Price History',
-        color: '#eceff1',
+        padding: {
+          top: 10,
+          bottom: 20
+        },
         font: {
-          size: 16
-        }
-      },
-      tooltip: {
-        mode: 'index',
-        intersect: false,
-        backgroundColor: 'rgba(30, 34, 45, 0.9)',
-        titleColor: '#eceff1',
-        bodyColor: '#d1d4dc',
-        borderColor: '#444',
-        borderWidth: 1,
-        padding: 10,
-        callbacks: {
-          label: function(context) {
-            let label = context.dataset.label || '';
-            if (label) {
-              label += ': ';
-            }
-            if (context.parsed.y !== null) {
-              label += new Intl.NumberFormat('en-US', {
-                style: 'currency',
-                currency: 'USD',
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-              }).format(context.parsed.y);
-            }
-            return label;
-          }
+          size: 16,
+          weight: 'bold'
         }
       }
     },
@@ -160,61 +126,57 @@ function SimulatorChart({ priceHistory, isLoading, error }) {
       x: {
         type: 'time',
         time: {
-          unit: 'minute',
-          tooltipFormat: 'PP pp',
+          unit: 'second',
           displayFormats: {
-            second: 'HH:mm:ss',
-            minute: 'HH:mm',
-            hour: 'HH:00',
-            day: 'MMM d'
+            second: 'HH:mm:ss'
           }
         },
-        ticks: { 
-          color: '#848e9c', 
-          source: 'auto', 
-          maxRotation: 0, 
-          autoSkip: true, 
-          autoSkipPadding: 20 
+        grid: {
+          display: true,
+          drawBorder: true,
+          drawOnChartArea: true,
+          drawTicks: true,
+          color: 'rgba(0, 0, 0, 0.1)'
         },
-        grid: { 
-          color: 'rgba(255, 255, 255, 0.1)',
-          drawBorder: false
+        ticks: {
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 10,
+          padding: 10
         }
       },
       y: {
-        ticks: { 
-          color: '#848e9c',
-          callback: function(value) {
-            return new Intl.NumberFormat('en-US', {
-              style: 'currency',
-              currency: 'USD',
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2
-            }).format(value);
-          }
+        position: 'right',
+        grid: {
+          display: true,
+          drawBorder: true,
+          drawOnChartArea: true,
+          drawTicks: true,
+          color: 'rgba(0, 0, 0, 0.1)'
         },
-        grid: { 
-          color: 'rgba(255, 255, 255, 0.1)',
-          drawBorder: false
+        ticks: {
+          padding: 10,
+          callback: function(value) {
+            return '$' + value.toFixed(2);
+          }
         }
       }
-    },
-    parsing: false,
-    normalized: true,
+    }
   };
 
+  if (isLoading) {
+    return <div>Loading chart...</div>;
+  }
+
+  if (error) {
+    return <div>Error loading chart: {error}</div>;
+  }
+
   return (
-    <div className="simulator-chart-widget">
-      {error && <p className="error-text">Chart Error: {error}</p>}
-      <div className="chart-target-container">
-        {isLoading ? (
-          <div className="chart-loading-overlay"><p>Loading Chart Data...</p></div>
-        ) : (
-          <Line ref={chartRef} options={options} data={chartData} />
-        )}
-      </div>
+    <div style={{ width: '100%', height: '400px', padding: '20px' }}>
+      <Line data={chartData} options={options} />
     </div>
   );
-}
+};
 
-export default React.memo(SimulatorChart);
+export default SimulatorChart;

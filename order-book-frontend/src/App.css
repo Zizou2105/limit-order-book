@@ -2,260 +2,323 @@
 
 /* Basic Reset & Body */
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
   margin: 0;
   padding: 0;
-  background-color: #131722; /* Dark background common in trading UIs */
-  color: #d1d4dc; /* Light text */
+  background-color: #131722;
+  color: #d1d4dc;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
 }
 
 .App {
-  padding: 15px;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-h1, h2, h3 {
+.app-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px;
+  box-sizing: border-box;
+}
+
+h1 {
+  text-align: center;
+  margin: 8px 0;
+  color: #eceff1;
+  font-weight: 500;
+  font-size: 24px;
+}
+
+h2, h3 {
   color: #eceff1;
   font-weight: 500;
   margin-top: 0; /* Remove default top margin */
 }
-h1 { text-align: center; margin-bottom: 20px;}
 h3 { margin-bottom: 10px; font-size: 1.1em; }
 
 /* Main Layout */
 .main-container {
   display: flex;
-  flex-wrap: wrap; /* Allow wrapping */
-  gap: 15px; /* Space between columns */
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 16px;
+  height: calc(100% - 140px); /* Reduced to give more space to Recent Activity */
 }
 
-.chart-container { /* Ensure this parent has defined height */
-  flex: 3;
-  min-width: 450px;
-  height: 500px; /* Or adjust as needed */
+/* Left Panel - Chart */
+.left-panel {
+  flex: 5;
+  min-width: 0;
   background-color: #1e222d;
   border-radius: 4px;
-  padding: 0; /* Remove padding if chart handles its own */
-  display: flex; /* Make it a flex container */
-  flex-direction: column; /* Stack title and chart */
-  overflow: hidden; /* Hide potential overflow */
+  overflow: hidden;
 }
 
-/* Specific widget container */
-.simulator-chart-widget {
-    height: 100%; /* Fill parent */
-    display: flex;
-    flex-direction: column;
-    padding: 10px; /* Add padding around title/chart */
-    box-sizing: border-box; /* Include padding in height/width */
-}
-
-.simulator-chart-widget h3 {
-    text-align: center;
-    margin-bottom: 8px;
-    flex-shrink: 0; /* Prevent title shrinking */
-}
-
-/* Container where the chart library will draw */
-.chart-target-container {
-    flex-grow: 1; /* Allow chart drawing area to fill remaining space */
-    width: 100%;
-    height: 100%; /* Take available height */
-    position: relative; /* Needed for overlay positioning */
-    overflow: hidden; /* Ensure chart doesn't overflow */
-}
-
-.chart-loading-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(30, 34, 45, 0.8); /* Semi-transparent overlay */
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 10; /* Ensure it's above chart */
-}
-.chart-loading-overlay p {
-    color: #eceff1;
-    font-size: 1.2em;
-}
-
-/* Error text specific to chart if needed */
-.simulator-chart-widget .error-text {
-    padding: 20px;
-    text-align: center;
-    color: #f6465d;
-    height: 100%; /* Center vertically */
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-
-.lob-trade-container {
-  flex: 1;
-  min-width: 300px;
+.chart-container {
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 15px;
+}
+
+/* Chart specific styles */
+.chart-content {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+}
+
+/* Middle Panel - Order Book */
+.middle-panel {
+  flex: 2;
+  min-width: 0;
+  background-color: #1e222d;
+  border-radius: 4px;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.middle-panel h3,
+.order-entry-section h3 {
+  text-align: center;
+  margin-bottom: 12px;
+  color: #eceff1;
+  font-size: 16px;
+}
+
+/* Right Panel - Order Entry and My Orders */
+.right-panel {
+  flex: 2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.order-entry-section {
+  background-color: #1e222d;
+  border-radius: 4px;
+  padding: 16px;
+  min-height: 220px;
+}
+
+.my-orders-section {
+  flex: 1;
+  background-color: #1e222d;
+  border-radius: 4px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Order Book Widget */
 .lob-widget {
-  background-color: #1e222d;
-  padding: 10px;
-  border-radius: 4px;
-  flex-shrink: 0;
-  max-height: 40vh; /* Limit height relative to viewport */
-  min-height: 200px; /* Ensure some minimum height */
-  display: flex;
-  flex-direction: column;
-  overflow: hidden; /* Hide overflow */
-}
-.lob-widget h3 {
-  text-align: center;
-  margin-bottom: 8px;
-  padding-bottom: 5px;
-  border-bottom: 1px solid #444;
-  flex-shrink: 0;
-}
-.lob-columns {
-  flex-grow: 1;
-  overflow-y: auto; /* Scroll inner content */
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
-
-.lob-asks { order: 1; } /* Asks appear first visually */
-.lob-bids { order: 2; } /* Bids appear below asks */
-
-.lob-asks, .lob-bids {
-  flex: 1; /* Share space, but layout controlled by parent */
-}
-
-.lob-asks table { margin-bottom: 5px;}
 
 .lob-widget table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85em;
+  font-size: 13px;
 }
-.lob-widget th, .lob-widget td {
-  padding: 3px 6px; /* Smaller padding */
+
+.lob-widget th,
+.lob-widget td {
+  padding: 4px 8px;
   text-align: right;
-  border-bottom: 1px solid #2a2e39;
-  white-space: nowrap; /* Prevent wrapping */
 }
+
 .lob-widget th {
   color: #848e9c;
   font-weight: normal;
-  position: sticky;
-  top: 0;
-  background-color: #1e222d;
-  z-index: 1; /* Keep header above scrolling content */
+  padding: 8px;
+  border-bottom: 1px solid #2a2e39;
 }
-.lob-widget tbody tr:last-child td { border-bottom: none; } /* Remove last border */
-.lob-widget td:nth-child(1) { width: 35%; } /* Price */
-.lob-widget td:nth-child(2) { width: 35%; } /* Amount */
-.lob-widget td:nth-child(3) { width: 30%; color: #848e9c; } /* Total */
 
-.price-bid { color: #0ecb81; font-weight: 500; }
-.price-ask { color: #f6465d; font-weight: 500; }
+.price-ask { color: #f6465d; }
+.price-bid { color: #0ecb81; }
 
-/* Order Entry Widget */
+/* Order Entry Form */
 .order-entry-widget {
-  background-color: #1e222d;
-  padding: 15px;
-  border-radius: 4px;
-  flex-shrink: 0; /* Don't shrink */
+  height: 100%;
 }
-.order-entry-widget h3 { text-align: center; }
-.order-entry-widget form div.form-group {
+
+.order-entry-widget form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-group {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
-  font-size: 0.9em;
 }
-.order-entry-widget label { color: #848e9c; }
-.order-entry-widget input, .order-entry-widget select {
-  background-color: #2b3139;
-  border: 1px solid #474d57;
-  color: #e0e0e0;
-  padding: 6px 8px;
-  border-radius: 3px;
+
+.order-entry-widget input,
+.order-entry-widget select {
   width: 60%;
+  padding: 8px;
+  background-color: #2b3139;
+  border: 1px solid #363c4e;
+  border-radius: 4px;
+  color: #eceff1;
+  font-size: 13px;
 }
-.order-entry-widget button.submit-button {
+
+.order-entry-widget button {
   width: 100%;
   padding: 10px;
   border: none;
-  border-radius: 3px;
-  color: #fff;
-  font-weight: bold;
-  cursor: pointer;
-  margin-top: 10px;
-  transition: opacity 0.2s ease;
-}
-.order-entry-widget button.buy { background-color: #0aaf70; } /* Slightly darker green */
-.order-entry-widget button.sell { background-color: #d93a4c; } /* Slightly darker red */
-.order-entry-widget button:hover { opacity: 0.9; }
-.order-entry-widget button:disabled { opacity: 0.5; cursor: not-allowed; }
-.submit-status { font-size: 0.85em; margin-top: 10px; text-align: center; height: 1.2em } /* Reserve space */
-.submit-status.error { color: #f6465d; }
-.submit-status.success { color: #0ecb81; }
-
-/* Recent Trades Widget */
-.recent-trades-widget {
-  background-color: #1e222d;
-  padding: 10px;
   border-radius: 4px;
-  flex-grow: 1; /* Allow filling remaining space */
-  min-height: 100px;
+  color: white;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.order-entry-widget button.buy { background-color: #0ecb81; }
+.order-entry-widget button.sell { background-color: #f6465d; }
+
+/* Client Orders Table */
+.client-orders {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden; /* Hide potential overflow */
 }
-.recent-trades-widget h3 { text-align: center;}
-.recent-trades-widget ul {
-  list-style: none;
-  padding: 0 5px;
-  margin: 0;
-  overflow-y: auto; /* Scroll if needed */
-  flex-grow: 1;
-  font-size: 0.8em;
+
+.client-orders table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
 }
-.recent-trades-widget li {
-  padding: 2px 0;
+
+.client-orders thead {
+  position: sticky;
+  top: 0;
+  background-color: #1e222d;
+  z-index: 1;
+}
+
+.client-orders th,
+.client-orders td {
+  padding: 8px;
+  text-align: left;
   border-bottom: 1px solid #2a2e39;
-  color: #aab;
-}
-.recent-trades-widget li:last-child { border-bottom: none; }
-
-/* Loading/Error Text */
-.lob-widget .loading-text, .lob-widget .error-text {
-    padding: 20px;
-    text-align: center;
-    color: #848e9c;
-}
-.lob-widget .error-text {
-    color: #f6465d;
 }
 
-/* Responsive */
-@media (max-width: 900px) {
+.client-orders th {
+  color: #848e9c;
+  font-weight: normal;
+}
+
+.client-orders tbody {
+  overflow-y: auto;
+}
+
+.client-orders .buy { color: #0ecb81; }
+.client-orders .sell { color: #f6465d; }
+
+.cancel-button {
+  background-color: #f6465d;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* Bottom Panel - Recent Activity */
+.bottom-panel {
+  height: 100px; /* Increased height */
+  background-color: #1e222d;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.recent-activity-content {
+  height: 100%;
+  overflow-y: auto;
+  font-size: 13px;
+  padding: 4px;
+}
+
+/* Toast Notifications */
+.Toastify__toast-container {
+  width: 320px;
+}
+
+.Toastify__toast {
+  background-color: #1e222d !important;
+  color: #eceff1 !important;
+  border-radius: 4px !important;
+  padding: 12px !important;
+  font-size: 13px !important;
+}
+
+.Toastify__toast--success {
+  border-left: 4px solid #0ecb81 !important;
+}
+
+.Toastify__toast--error {
+  border-left: 4px solid #f6465d !important;
+}
+
+/* Responsive Design */
+@media screen and (max-width: 1600px) {
   .main-container {
-    flex-direction: column;
+    gap: 12px;
+    height: calc(100% - 140px);
   }
-  .chart-container {
-     min-width: 95%; /* Take most width */
-     height: 350px; /* Adjust height */
-     flex: auto; /* Reset flex factor */
+  
+  .left-panel {
+    flex: 4;
   }
-  .lob-trade-container {
-     min-width: 95%;
-     flex: auto;
+  
+  .middle-panel,
+  .right-panel {
+    flex: 2;
+  }
+}
+
+@media screen and (max-width: 1200px) {
+  .main-container {
+    flex-wrap: wrap;
+  }
+
+  .left-panel {
+    flex: 1 1 100%;
+    height: 400px;
+  }
+
+  .middle-panel,
+  .right-panel {
+    flex: 1 1 calc(50% - 8px);
+  }
+
+  .bottom-panel {
+    height: 120px;
   }
 }
 
@@ -292,7 +355,9 @@ h3 { margin-bottom: 10px; font-size: 1.1em; }
   background-color: #1e222d;
   padding: 15px;
   border-radius: 4px;
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .client-orders-widget h3 {
@@ -302,13 +367,22 @@ h3 { margin-bottom: 10px; font-size: 1.1em; }
 }
 
 .orders-table-container {
-  overflow-x: auto;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .client-orders-widget table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9em;
+}
+
+.client-orders-widget thead {
+  position: sticky;
+  top: 0;
+  background-color: #1e222d;
+  z-index: 1;
 }
 
 .client-orders-widget th,
@@ -370,21 +444,34 @@ h3 { margin-bottom: 10px; font-size: 1.1em; }
   font-size: 0.85em;
 }
 
-/* Toast notifications customization */
-.Toastify__toast {
-  background-color: #1e222d !important;
-  color: #eceff1 !important;
-  border-radius: 4px !important;
+.recent-trades-widget h3 {
+  margin: 0 0 10px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #2a2e39;
+  color: #eceff1;
+  font-weight: 500;
+  font-size: 1em;
+  text-align: center;
 }
 
-.Toastify__toast--success {
-  border-left: 4px solid #0ecb81 !important;
+.trade-item {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 4px 2px;
+  border-bottom: 1px solid #2a2e39;
+  gap: 8px;
+  text-align: center;
 }
 
-.Toastify__toast--info {
-  border-left: 4px solid #ffa726 !important;
+.trade-time {
+  color: #848e9c;
 }
 
-.Toastify__toast--error {
-  border-left: 4px solid #f6465d !important;
+.trade-side {
+  font-weight: 500;
+}
+
+.trade-volume,
+.trade-price {
 }

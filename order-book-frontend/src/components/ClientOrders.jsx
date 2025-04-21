@@ -17,18 +17,15 @@ function ClientOrders({ client, orders, onCancelOrder }) {
         <table>
           <thead>
             <tr>
-              <th>Order ID</th>
               <th>Side</th>
               <th>Price</th>
               <th>Volume</th>
-              <th>Status</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
             {orders.map((order) => (
               <tr key={order.order_id}>
-                <td>{order.order_id}</td>
                 <td className={`side-${order.side.toLowerCase()}`}>{order.side}</td>
                 <td>{order.price.toFixed(2)}</td>
                 <td>
@@ -38,13 +35,6 @@ function ClientOrders({ client, orders, onCancelOrder }) {
                     </span>
                   ) : (
                     order.volume
-                  )}
-                </td>
-                <td>
-                  {order.originalVolume && order.volume < order.originalVolume ? (
-                    <span className="status-partial">Partially Filled</span>
-                  ) : (
-                    <span className="status-active">Active</span>
                   )}
                 </td>
                 <td>

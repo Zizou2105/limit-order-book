@@ -367,50 +367,61 @@ function App() {
 
   return (
     <div className="App">
-      <ToastContainer 
-        position="top-right"
-        autoClose={5000}
-        hideProgressBar={false}
-        newestOnTop
-        closeOnClick
-        rtl={false}
-        pauseOnFocusLoss
-        draggable
-        pauseOnHover
-      />
-      <h1>LOB Simulator & Chart</h1>
-      {/* Display general errors prominently */} 
-      {error && <p className="error-text app-error">Error: {error}</p>}
-      <div className="main-container">
-        <div className="chart-container">
-          {/* Pass price history and loading state to chart */}
-          <SimulatorChart 
-             priceHistory={priceHistory} 
-             isLoading={isLoading} 
-             // Chart doesn't need separate error prop if using main loading state
-             error={null} 
-           />
-        </div>
-        <div className="lob-trade-container">
-          {/* Pass loading and error state to OrderBookDisplay */}
-          <OrderBookDisplay 
-             bids={bids} 
-             asks={asks} 
-             isLoading={isLoading} // Use the unified loading state
-             error={error} // Use the unified error state
-           />
-          <div className="order-forms-container">
-            <OrderEntryForm 
-              handlePlaceOrder={handlePlaceOrderSubmit} 
-              currentClient={currentClient}
-            />
-            <ClientOrders 
-              client={currentClient}
-              orders={clientOrders}
-              onCancelOrder={handleCancelOrder}
+      <div className="app-content">
+        <ToastContainer 
+          position="top-right"
+          autoClose={5000}
+          hideProgressBar={false}
+          newestOnTop
+          closeOnClick
+          rtl={false}
+          pauseOnFocusLoss
+          draggable
+          pauseOnHover
+        />
+        <h1>Order Book Simulator</h1>
+        {error && <p className="error-text app-error">Error: {error}</p>}
+        <div className="main-container">
+          <div className="left-panel">
+            <div className="chart-container">
+              <SimulatorChart 
+                priceHistory={priceHistory} 
+                isLoading={isLoading} 
+                error={null} 
+              />
+            </div>
+          </div>
+          
+          <div className="middle-panel">
+            <OrderBookDisplay 
+              bids={bids} 
+              asks={asks} 
+              isLoading={isLoading}
+              error={error}
             />
           </div>
-          <RecentTrades trades={lastTrades} />
+
+          <div className="right-panel">
+            <div className="order-entry-section">
+              <OrderEntryForm 
+                handlePlaceOrder={handlePlaceOrderSubmit} 
+                currentClient={currentClient}
+              />
+            </div>
+            <div className="my-orders-section">
+              <ClientOrders 
+                client={currentClient}
+                orders={clientOrders}
+                onCancelOrder={handleCancelOrder}
+              />
+            </div>
+          </div>
+        </div>
+        
+        <div className="bottom-panel">
+          <div className="recent-activity-content">
+            <RecentTrades trades={lastTrades} />
+          </div>
         </div>
       </div>
     </div>
