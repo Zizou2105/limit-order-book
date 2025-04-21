@@ -23,6 +23,7 @@ function App() {
   const [error, setError] = useState(null); // Combined error state
   const [clientOrders, setClientOrders] = useState([]);
   const [currentClient, setCurrentClient] = useState('ReactClient');
+  const [isSimulatorActive, setIsSimulatorActive] = useState(true); // NEW: State for simulator toggle
   const wsRef = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
@@ -287,6 +288,56 @@ function App() {
     return cleanup;
   }, []);
 
+  // Fetch initial simulator status
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const response = await fetch(`${API_URL}/simulator/status`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch simulator status');
+        }
+        const data = await response.json();
+        console.log("Fetched initial simulator status:", data.active);
+        setIsSimulatorActive(data.active);
+      } catch (err) {
+        console.error("Error fetching simulator status:", err);
+        toast.error("Could not fetch simulator status.");
+      }
+    };
+    fetchStatus();
+  }, []); // Run only once on mount
+
+  // Handle Simulator Toggle
+  const handleSimulatorToggle = useCallback(async () => {
+    const newState = !isSimulatorActive;
+    console.log(`Toggling simulator to: ${newState}`);
+    // Optimistic UI update
+    setIsSimulatorActive(newState);
+
+    try {
+      const response = await fetch(`${API_URL}/simulator/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: newState }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.active !== newState) {
+        console.error("Failed to toggle simulator or backend state mismatch:", result);
+        // Revert optimistic update on failure or mismatch
+        setIsSimulatorActive(!newState);
+        toast.error(`Failed to toggle simulator. Status: ${result.active ? 'ON' : 'OFF'}`);
+        throw new Error('Simulator toggle failed');
+      }
+      console.log("Simulator toggled successfully. New state:", result.active);
+      toast.success(`Simulator turned ${result.active ? 'ON' : 'OFF'}`);
+    } catch (e) {
+      console.error("Error toggling simulator:", e);
+      // Revert optimistic update on error
+      setIsSimulatorActive(!newState);
+      toast.error("Error toggling simulator.");
+    }
+  }, [isSimulatorActive]); // Dependency on isSimulatorActive
+
   // Handle Order Submission (passed to OrderEntryForm)
   const handlePlaceOrderSubmit = useCallback(async (client, sideInt, price, volume) => {
     if (!API_URL) {
@@ -399,6 +450,20 @@ function App() {
               isLoading={isLoading}
               error={error}
             />
+            {/* --- Simulator Toggle Switch --- */}
+            <div className="simulator-toggle">
+              <label className="switch">
+                <input 
+                  type="checkbox" 
+                  checked={isSimulatorActive}
+                  onChange={handleSimulatorToggle}
+                  disabled={isLoading} // Disable while loading WS maybe?
+                />
+                <span className="slider round"></span>
+              </label>
+              <span>Auto Trader {isSimulatorActive ? 'ON' : 'OFF'}</span>
+            </div>
+            {/* --- End Simulator Toggle Switch --- */}
           </div>
 
           <div className="right-panel">

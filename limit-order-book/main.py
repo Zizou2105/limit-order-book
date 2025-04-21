@@ -8,7 +8,7 @@ import asyncio
 import random
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict
+from typing import List, Dict, Annotated
 import json
 
 
@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 logger.info("Creating global OrderBook instance...")
 lob = OrderBook(history_limit=200)
 logger.info("Global OrderBook instance created.")
+
+# --- Simulator Control Event ---
+logger.info("Creating simulator control event (initially active).")
+simulator_active_event = asyncio.Event()
+simulator_active_event.set() # Start as active
 
 # --- WebSocket Manager ---
 class WebSocketManager:
@@ -73,80 +78,107 @@ class WebSocketManager:
 # Initialize WebSocket manager
 ws_manager = WebSocketManager()
 
-# --- Simulator Logic ---
-async def run_direct_lob_simulator():
-     logger.info("Starting direct LOB simulator...")
-     client_names = ["TraderA", "TraderB", "TraderC", "TraderD", "MMaker1"]
-     while True:
+# --- Simple Order Generator ---
+async def simple_order_generator():
+    logger.info("SimpleGen TASK STARTED.")
+    logger.info("Starting simple order generator...")
+    order_counter = 1 # Simple way to ensure unique orders if needed by logic
+    client_name = "AutoTrader"
+    last_mid_price = 100.0 # Keep track of the last price
+    while True:
         try:
-            sleep_time = random.uniform(0.5, 3.0)
-            await asyncio.sleep(sleep_time)
+            # --- Wait for activation signal --- 
+            await simulator_active_event.wait() 
+            logger.info("SimpleGen loop entered (Simulator Active).")
+            # --- Short delay before generating --- 
+            await asyncio.sleep(0.5) # Wait 0.5 seconds - FASTER
+            logger.info("SimpleGen awake after sleep.")
 
-            side = random.choice([Side.BUY, Side.SELL])
+            # --- Check again in case it was toggled off during sleep --- 
+            if not simulator_active_event.is_set():
+                logger.info("SimpleGen loop paused (toggled off during sleep).")
+                continue # Go back to waiting for the event
+
+            # --- Calculate Mid Price ---
             best_bid = lob.get_best_bid()
             best_ask = lob.get_best_ask()
-            base_price = 100.0
-            if best_bid is not None and best_ask is not None: base_price = (best_bid + best_ask) / 2.0
-            elif best_ask is not None: base_price = best_ask - 0.5
-            elif best_bid is not None: base_price = best_bid + 0.5
-            price_offset = random.uniform(-1.5, 1.5)
-            order_price = max(0.01, round(base_price + price_offset, 2)) # Ensure positive price
-            order_volume = random.randint(5, 50)
-            client_name = random.choice(client_names)
-
-            logger.info(f"DirectSim placing: {client_name} {side.name} {order_volume}@{order_price:.2f}")
-            order_id, trades = lob.place_order(client_name, side, order_price, order_volume)
+            current_mid_price = last_mid_price
+            if best_bid is not None and best_ask is not None:
+                current_mid_price = (best_bid + best_ask) / 2.0
+            elif best_bid is not None:
+                 # If only bids, price slightly above best bid
+                 current_mid_price = best_bid + 0.01 
+            elif best_ask is not None:
+                 # If only asks, price slightly below best ask
+                 current_mid_price = best_ask - 0.01
             
-            # Broadcast order book update after each order
+            last_mid_price = current_mid_price # Update last known price
+            # --- Generate Order --- 
+            side = random.choice([Side.BUY, Side.SELL])
+            # Normally distributed offset around 0
+            price_offset = random.normalvariate(mu=0, sigma=0.25) 
+            order_price = round(current_mid_price + price_offset, 2)
+            # Ensure price is positive
+            order_price = max(0.01, order_price) 
+
+            order_volume = random.randint(5, 25) # Randomize volume slightly
+
+            logger.info(f"SimpleGen placing: {client_name} {side.name} {order_volume}@{order_price:.2f} (Mid: {current_mid_price:.2f})")
+            
+            # Use the existing LOB logic to place the order and get trades
+            order_id, trades = lob.place_order(client_name, side, order_price, order_volume)
+            logger.info(f"SimpleGen Order {order_id} placed. Trades: {len(trades)}")
+
+            # Broadcast the updated order book snapshot AND trades together
             snapshot = lob.get_order_book_snapshot(levels=15)
-            await ws_manager.broadcast({
+            broadcast_message = {
                 "type": "order_book_update",
                 "data": snapshot
-            })
+            }
+            if trades: # Add trades to the SAME message if they exist
+                broadcast_message["trades"] = trades
+                logger.info(f"SimpleGen Including {len(trades)} trades in broadcast.")
+            
+            await ws_manager.broadcast(broadcast_message)
+            logger.info(f"SimpleGen Broadcasted order_book_update. Bids: {len(snapshot.get('bids',[]))}, Asks: {len(snapshot.get('asks',[]))}")
 
-            if trades:
-                await ws_manager.broadcast({
-                    "type": "trades",
-                    "data": trades
-                })
-
-            if random.random() < 0.05 and lob.order_map:
-                 order_id_to_cancel = random.choice(list(lob.order_map.keys()))
-                 logger.info(f"DirectSim cancelling: {order_id_to_cancel}")
-                 lob.cancel_order(order_id_to_cancel)
-                 # Broadcast order book update after cancellation
-                 snapshot = lob.get_order_book_snapshot(levels=15)
-                 await ws_manager.broadcast({
-                     "type": "order_book_update",
-                     "data": snapshot
-                 })
 
         except asyncio.CancelledError:
-             logger.info("Direct LOB simulator task cancelled.")
-             break
+            logger.info("Simple order generator task cancelled.")
+            break
         except Exception as e:
-            logger.error(f"Direct simulator error: {e}", exc_info=True)
-            await asyncio.sleep(5)
+            logger.error(f"Simple order generator error: {e}", exc_info=True)
+            await asyncio.sleep(5) # Wait before retrying on error
+
+
+# --- API Models ---
+class SimulatorStatus(BaseModel):
+    active: bool
 
 # --- Lifespan Context Manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Application startup... starting background simulator.")
-    simulator_task = asyncio.create_task(run_direct_lob_simulator())
+    logger.info("Application startup... starting simple background generator.")
+    # Start the NEW generator task
+    generator_task = asyncio.create_task(simple_order_generator())
+    logger.info(f"SimpleGen TASK CREATED: {generator_task}")
+    logger.info("Lifespan: Before yield")
     yield
-    logger.info("Application shutdown... cancelling simulator task.")
-    simulator_task.cancel()
+    logger.info("Lifespan: After yield")
+    logger.info("Application shutdown... cancelling generator task.")
+    generator_task.cancel()
     try:
-        await simulator_task
+        await generator_task
     except asyncio.CancelledError:
-        logger.info("Simulator task successfully cancelled.")
+        logger.info("Generator task successfully cancelled.")
     logger.info("Lifespan shutdown complete.")
 
 
 app = FastAPI(
     title="Order Book Simulator API",
     description="API to interact with a Limit Order Book simulation.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 origins = [
@@ -196,6 +228,29 @@ class PriceHistoryPoint(BaseModel):
 
 class PriceHistoryResponse(BaseModel):
     history: list[PriceHistoryPoint]
+
+# --- API Endpoints ---
+
+@app.get("/simulator/status", response_model=SimulatorStatus)
+async def get_simulator_status():
+    """Check if the automatic order generator is currently active."""
+    is_active = simulator_active_event.is_set()
+    logger.info(f"API GET /simulator/status - Returning active={is_active}")
+    return SimulatorStatus(active=is_active)
+
+@app.post("/simulator/toggle", response_model=SimulatorStatus)
+async def toggle_simulator(status: SimulatorStatus):
+    """Turn the automatic order generator on or off."""
+    if status.active:
+        logger.info("API POST /simulator/toggle - Setting simulator ACTIVE")
+        simulator_active_event.set()
+    else:
+        logger.info("API POST /simulator/toggle - Setting simulator INACTIVE")
+        simulator_active_event.clear()
+    # Return the *actual* current status after the operation
+    current_status = simulator_active_event.is_set()
+    logger.info(f"API POST /simulator/toggle - Current status active={current_status}")
+    return SimulatorStatus(active=current_status)
 
 @app.get("/")
 async def read_root():
