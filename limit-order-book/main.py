@@ -201,11 +201,21 @@ class OrderRequest(BaseModel):
     price: float
     volume: int
 
+# NEW: Define a Pydantic model for a Trade in the response
+class TradeResponse(BaseModel):
+    timestamp: float
+    price: float
+    volume: int
+    maker_order_id: int
+    taker_order_id: int
+    maker_client: str
+    taker_client: str
+
 class PlaceOrderResponse(BaseModel):
     """Defines the response structure after placing an order."""
     message: str
     order_id: int | None = None
-    trades_executed: list[str] = []
+    trades_executed: List[TradeResponse] = []
 
 class CancelOrderResponse(BaseModel):
     """Defines the response structure after cancelling an order."""

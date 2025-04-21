@@ -167,63 +167,56 @@ function App() {
               
               // Handle trades
               if (data.trades && data.trades.length > 0) {
-                console.log('Processing trades:', data.trades);
+                console.log('Processing trades:', data.trades); // data.trades is now Array[Trade]
+                // Store the structured trades directly
                 setLastTrades(prevTrades => [...data.trades, ...prevTrades].slice(0, 15));
                 
-                data.trades.forEach(trade => {
-                  console.log('Processing trade:', trade);
+                data.trades.forEach(trade => { // trade is now a structured object
+                  console.log('Processing structured trade:', trade);
                   
-                  // Improved trade parsing
-                  const tradeMatch = trade.match(/Trade Executed: (\d+) shares @ (\d+\.\d+) \(Incoming: .* ID:(\d+), Resting: .* ID:(\d+)\)/);
-                  if (!tradeMatch) {
-                    console.error('Failed to parse trade message:', trade);
-                    return;
-                  }
-                  
-                  const [, volume, price, incomingOrderId, restingOrderId] = tradeMatch;
-                  const parsedVolume = parseInt(volume);
-                  const parsedPrice = parseFloat(price);
-                  const parsedOrderId = parseInt(incomingOrderId);
-                  
-                  console.log('Parsed trade details:', {
-                    volume: parsedVolume,
-                    price: parsedPrice,
-                    orderId: parsedOrderId,
-                    rawTrade: trade
-                  });
-                  
-                  // Add trade price to price history
+                  // --- Update Price History --- 
+                  // Use timestamp and price from the structured trade object
                   setPriceHistory(prevHistory => {
                     const newHistory = [...prevHistory, {
-                      timestamp: Date.now(),
-                      price: parsedPrice,
+                      timestamp: trade.timestamp, // Use timestamp from trade
+                      price: trade.price,
                       isTrade: true
                     }];
                     console.log('Updated price history with trade:', {
-                      newPrice: parsedPrice,
+                      newPrice: trade.price,
                       historyLength: newHistory.length
                     });
                     return newHistory.slice(-MAX_PRICE_HISTORY);
                   });
                   
+                  // --- Update Client Orders --- 
+                  // Check if EITHER maker or taker belongs to the current client
                   setClientOrders(prevOrders => {
                     console.log('Current client orders:', prevOrders);
                     const updatedOrders = prevOrders.map(order => {
-                      if (order.order_id === parsedOrderId) {
-                        console.log(`Found matching order: ${order.order_id}`);
-                        const remainingVolume = order.volume - parsedVolume;
+                      let involvedOrderId = null;
+                      if (order.client === trade.maker_client && order.order_id === trade.maker_order_id) {
+                        involvedOrderId = trade.maker_order_id;
+                        console.log(`Trade involves current client's MAKER order: ${involvedOrderId}`);
+                      } else if (order.client === trade.taker_client && order.order_id === trade.taker_order_id) {
+                         involvedOrderId = trade.taker_order_id;
+                         console.log(`Trade involves current client's TAKER order: ${involvedOrderId}`);
+                      }
+
+                      if (involvedOrderId !== null) {
+                        const remainingVolume = order.volume - trade.volume;
                         if (remainingVolume > 0) {
-                          console.log(`Order ${parsedOrderId} partially filled. Remaining volume: ${remainingVolume}`);
-                          toast.info(`Order ${parsedOrderId} partially filled: ${parsedVolume} @ ${parsedPrice}`);
+                          console.log(`Order ${involvedOrderId} partially filled. Remaining volume: ${remainingVolume}`);
+                          toast.info(`Your Order ${involvedOrderId} partially filled: ${trade.volume} @ ${trade.price.toFixed(2)}`);
                           return { ...order, volume: remainingVolume };
                         } else {
-                          console.log(`Order ${parsedOrderId} fully filled`);
-                          toast.success(`Order ${parsedOrderId} fully filled: ${parsedVolume} @ ${parsedPrice}`);
-                          return null;
+                          console.log(`Order ${involvedOrderId} fully filled`);
+                          toast.success(`Your Order ${involvedOrderId} fully filled: ${trade.volume} @ ${trade.price.toFixed(2)}`);
+                          return null; // Mark for removal
                         }
                       }
-                      return order;
-                    }).filter(Boolean);
+                      return order; // Order not involved in this trade
+                    }).filter(Boolean); // Remove null entries (fully filled orders)
                     
                     console.log('Updated client orders after trade:', updatedOrders);
                     return updatedOrders;

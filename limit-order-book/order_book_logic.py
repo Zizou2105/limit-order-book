@@ -3,6 +3,7 @@ import datetime
 import heapq
 from collections import deque
 import logging
+from typing import TypedDict, List
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - LGC - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -10,6 +11,15 @@ logger = logging.getLogger(__name__)
 class Side(Enum):
     BUY = auto()
     SELL = auto()
+
+class Trade(TypedDict):
+    timestamp: float # JS compatible timestamp (milliseconds)
+    price: float
+    volume: int
+    maker_order_id: int
+    taker_order_id: int
+    maker_client: str
+    taker_client: str
 
 class Order:
     def __init__(self, order_id: int, client: str, side: Side, price: float, volume: int):
@@ -93,18 +103,20 @@ class OrderBook:
             self.queue_map[map_key].append(order)
             print(f" Order {order.order_id} appended to existing queue for {map_key}.")
     
-    def place_order(self, client: str, side: Side, price: float, volume: int) -> tuple[int, list[str]]:
-        """Places order, matches, adds remainder, RETURNS order_id and trades list."""
+    def place_order(self, client: str, side: Side, price: float, volume: int) -> tuple[int, List[Trade]]:
+        """Places order, matches, adds remainder, RETURNS order_id and list of structured trades."""
         order_id = self._generate_order_id()
-        order = Order(order_id, client, side, price, volume)
-        self.order_map[order_id] = order
+        # Store the incoming order as the taker initially
+        taker_order = Order(order_id, client, side, price, volume)
+        self.order_map[order_id] = taker_order
 
-        logger.info(f"Received Order: {order}")
-        trades_executed_by_this_order = []
+        logger.info(f"Received Order: {taker_order}")
+        trades_executed: List[Trade] = [] # MODIFIED: Use list of Trade dicts
 
-        if order.side == Side.BUY:
-            opposite_heap = self.asks_heap
-            while order.volume > 0 and opposite_heap and order.price >= opposite_heap[0][0]:
+        # Determine which side to match against
+        if taker_order.side == Side.BUY:
+            opposite_heap = self.asks_heap # Buy order matches against asks
+            while taker_order.volume > 0 and opposite_heap and taker_order.price >= opposite_heap[0][0]:
                 best_price_key, best_queue = opposite_heap[0]
                 actual_best_price = best_price_key
 
@@ -115,30 +127,49 @@ class OrderBook:
                     if map_key_del in self.queue_map: del self.queue_map[map_key_del]
                     continue
 
-                while best_queue and order.volume > 0:
-                    resting_order = best_queue[0]
-                    trade_volume = min(order.volume, resting_order.volume)
-                    trade_price = resting_order.price
-                    trade_info = (f"Trade Executed: {trade_volume} shares @ {trade_price:.2f} "
-                                f"(Incoming: {order.client} ID:{order.order_id}, "
-                                f"Resting: {resting_order.client} ID:{resting_order.order_id})")
-                    trades_executed_by_this_order.append(trade_info)
-                    self.trade_log.append(trade_info)
-                    logger.info(f"  {trade_info}")
+                # Process orders in the best price queue
+                while best_queue and taker_order.volume > 0:
+                    # The resting order in the book is the maker
+                    maker_order = best_queue[0]
+                    trade_volume = min(taker_order.volume, maker_order.volume)
+                    trade_price = maker_order.price # Trade happens at the resting order's price
+                    trade_timestamp = datetime.datetime.now().timestamp() * 1000 # JS timestamp
 
-                    order.volume -= trade_volume
-                    resting_order.volume -= trade_volume
-                    resting_map_key = (resting_order.price, resting_order.side)
-                    self.volume_map[resting_map_key] -= trade_volume
-                    logger.info(f"  Volume map updated for {resting_map_key}: New total vol = {self.volume_map.get(resting_map_key, 0)}")
+                    # Create structured trade info
+                    trade: Trade = {
+                        "timestamp": trade_timestamp,
+                        "price": trade_price,
+                        "volume": trade_volume,
+                        "maker_order_id": maker_order.order_id,
+                        "taker_order_id": taker_order.order_id,
+                        "maker_client": maker_order.client,
+                        "taker_client": taker_order.client,
+                    }
+                    trades_executed.append(trade)
+                    # Optionally log the structured trade
+                    logger.info(f"  Trade Executed: Vol={trade['volume']} @ Price={trade['price']:.2f} (TakerID:{trade['taker_order_id']} vs MakerID:{trade['maker_order_id']})")
+                    # Also add the old string format to the internal log for compatibility if needed elsewhere
+                    trade_info_str = (f"Trade Executed: {trade_volume} shares @ {trade_price:.2f} "
+                                      f"(Incoming: {taker_order.client} ID:{taker_order.order_id}, "
+                                      f"Resting: {maker_order.client} ID:{maker_order.order_id})")
+                    self.trade_log.append(trade_info_str) # Keep old log format internally if desired
 
-                    if resting_order.volume == 0:
-                        filled_order_id = resting_order.order_id
+                    # Update volumes
+                    taker_order.volume -= trade_volume
+                    maker_order.volume -= trade_volume
+                    maker_map_key = (maker_order.price, maker_order.side)
+                    self.volume_map[maker_map_key] -= trade_volume
+                    logger.info(f"  Volume map updated for {maker_map_key}: New total vol = {self.volume_map.get(maker_map_key, 0)}")
+
+                    # Handle fully filled maker order
+                    if maker_order.volume == 0:
+                        filled_order_id = maker_order.order_id
                         best_queue.popleft()
-                        logger.info(f"  Resting Order {filled_order_id} fully filled and removed from queue.")
+                        logger.info(f"  Maker Order {filled_order_id} fully filled and removed from queue.")
                         if filled_order_id in self.order_map:
                             del self.order_map[filled_order_id]
 
+                # Clean up empty price level from heap
                 if not best_queue:
                     logger.info(f" Queue for price {actual_best_price:.2f} is now empty. Removing from heap.")
                     heapq.heappop(opposite_heap)
@@ -147,11 +178,11 @@ class OrderBook:
                     if map_key_to_delete in self.volume_map and self.volume_map[map_key_to_delete] <= 0:
                         del self.volume_map[map_key_to_delete]
 
-        else:
-            opposite_heap = self.bids_heap
-            while order.volume > 0 and opposite_heap and order.price <= -opposite_heap[0][0]:
+        else: # taker_order.side == Side.SELL
+            opposite_heap = self.bids_heap # Sell order matches against bids
+            while taker_order.volume > 0 and opposite_heap and taker_order.price <= -opposite_heap[0][0]:
                 best_price_key, best_queue = opposite_heap[0]
-                actual_best_price = -best_price_key
+                actual_best_price = -best_price_key # Price is negative in bids heap
 
                 if not best_queue:
                     logger.warning(f"Empty queue found in bids heap at price {actual_best_price:.2f}. Cleaning.")
@@ -160,31 +191,50 @@ class OrderBook:
                     if map_key_del in self.queue_map: del self.queue_map[map_key_del]
                     continue
 
-                while best_queue and order.volume > 0:
-                    resting_order = best_queue[0]
-                    trade_volume = min(order.volume, resting_order.volume)
-                    trade_price = resting_order.price
-                    trade_info = (f"Trade Executed: {trade_volume} shares @ {trade_price:.2f} "
-                                f"(Incoming: {order.client} ID:{order.order_id}, "
-                                f"Resting: {resting_order.client} ID:{resting_order.order_id})")
-                    trades_executed_by_this_order.append(trade_info)
-                    self.trade_log.append(trade_info)
-                    logger.info(f"  {trade_info}")
+                # Process orders in the best price queue
+                while best_queue and taker_order.volume > 0:
+                    # The resting order in the book is the maker
+                    maker_order = best_queue[0]
+                    trade_volume = min(taker_order.volume, maker_order.volume)
+                    trade_price = maker_order.price # Trade happens at the resting order's price
+                    trade_timestamp = datetime.datetime.now().timestamp() * 1000 # JS timestamp
 
-                    order.volume -= trade_volume
-                    resting_order.volume -= trade_volume
-                    resting_map_key = (resting_order.price, resting_order.side)
-                    self.volume_map[resting_map_key] -= trade_volume
-                    logger.info(f"  Volume map updated for {resting_map_key}: New total vol = {self.volume_map.get(resting_map_key, 0)}")
+                    # Create structured trade info
+                    trade: Trade = {
+                        "timestamp": trade_timestamp,
+                        "price": trade_price,
+                        "volume": trade_volume,
+                        "maker_order_id": maker_order.order_id,
+                        "taker_order_id": taker_order.order_id,
+                        "maker_client": maker_order.client,
+                        "taker_client": taker_order.client,
+                    }
+                    trades_executed.append(trade)
+                    # Optionally log the structured trade
+                    logger.info(f"  Trade Executed: Vol={trade['volume']} @ Price={trade['price']:.2f} (TakerID:{trade['taker_order_id']} vs MakerID:{trade['maker_order_id']})")
+                    # Also add the old string format to the internal log for compatibility if needed elsewhere
+                    trade_info_str = (f"Trade Executed: {trade_volume} shares @ {trade_price:.2f} "
+                                      f"(Incoming: {taker_order.client} ID:{taker_order.order_id}, "
+                                      f"Resting: {maker_order.client} ID:{maker_order.order_id})")
+                    self.trade_log.append(trade_info_str) # Keep old log format internally if desired
 
-                    if resting_order.volume == 0:
-                        filled_order_id = resting_order.order_id
+
+                    # Update volumes
+                    taker_order.volume -= trade_volume
+                    maker_order.volume -= trade_volume
+                    maker_map_key = (maker_order.price, maker_order.side)
+                    self.volume_map[maker_map_key] -= trade_volume
+                    logger.info(f"  Volume map updated for {maker_map_key}: New total vol = {self.volume_map.get(maker_map_key, 0)}")
+
+                    # Handle fully filled maker order
+                    if maker_order.volume == 0:
+                        filled_order_id = maker_order.order_id
                         best_queue.popleft()
-                        logger.info(f"  Resting Order {filled_order_id} fully filled and removed from queue.")
+                        logger.info(f"  Maker Order {filled_order_id} fully filled and removed from queue.")
                         if filled_order_id in self.order_map:
                             del self.order_map[filled_order_id]
 
-
+                # Clean up empty price level from heap
                 if not best_queue:
                     logger.info(f" Queue for price {actual_best_price:.2f} is now empty. Removing from heap.")
                     heapq.heappop(opposite_heap)
@@ -193,17 +243,18 @@ class OrderBook:
                     if map_key_to_delete in self.volume_map and self.volume_map[map_key_to_delete] <= 0:
                         del self.volume_map[map_key_to_delete]
 
-        if order.volume > 0:
-            logger.info(f"Order {order_id} has remaining volume {order.volume}. Adding to book.")
-            self._add_order_to_book(order)
+        # Add remaining taker volume to the book
+        if taker_order.volume > 0:
+            logger.info(f"Order {order_id} has remaining volume {taker_order.volume}. Adding to book.")
+            self._add_order_to_book(taker_order)
         else:
             logger.info(f"Order {order_id} fully filled during matching.")
             if order_id in self.order_map:
-                del self.order_map[order_id]
+                del self.order_map[order_id] # Remove fully filled taker order
 
         self._update_price_history()
 
-        return order_id, trades_executed_by_this_order
+        return order_id, trades_executed # MODIFIED: Return structured trades
 
     def get_volume_at_price(self, price: float, side: Side) -> int:
          """Returns the total active volume at a specific price and side using volume_map (O(1))."""
