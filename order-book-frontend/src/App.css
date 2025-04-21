@@ -476,16 +476,24 @@ h3 { margin-bottom: 10px; font-size: 1.1em; }
 .trade-price {
 }
 
+/* NEW: Style for the order book wrapper within middle-panel */
+.order-book-container {
+  flex: 1 1 auto; /* Allow grow/shrink, base size auto */
+  overflow-y: auto; /* Add scrollbar if needed */
+  min-height: 0; /* Crucial for flex shrinking */
+  margin-bottom: 10px; /* Add a little space before the toggle */
+}
+
 /* Add these styles for the toggle switch */
 .simulator-toggle {
   display: flex;
   align-items: center;
   justify-content: center; /* Center align the switch and text */
-  margin-top: 15px; /* Add some space above the switch */
   padding: 10px;
   background-color: #1e222d; /* Match panel background */
   border: 1px solid #2a2e39; /* Add subtle border like other elements */
   border-radius: 4px; /* Match other panel radius */
+  flex: 0 0 auto; /* Prevent toggle from growing or shrinking */
 }
 
 .simulator-toggle span {

@@ -444,12 +444,14 @@ function App() {
           </div>
           
           <div className="middle-panel">
-            <OrderBookDisplay 
-              bids={bids} 
-              asks={asks} 
-              isLoading={isLoading}
-              error={error}
-            />
+            <div className="order-book-container"> 
+              <OrderBookDisplay 
+                bids={bids} 
+                asks={asks} 
+                isLoading={isLoading}
+                error={error}
+              />
+            </div>
             {/* --- Simulator Toggle Switch --- */}
             <div className="simulator-toggle">
               <label className="switch">
