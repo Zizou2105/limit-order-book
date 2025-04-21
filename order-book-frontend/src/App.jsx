@@ -145,85 +145,187 @@ function App() {
           }
 
           try {
-            const data = JSON.parse(event.data);
-            console.log('Received WebSocket message:', data);
+            const messageData = JSON.parse(event.data);
+            console.log('Received WebSocket message:', messageData);
 
-            if (data.type === 'order_book_update') {
-              console.log('Processing order book update');
-              
-              // Update order book state
-              setBids(data.data.bids || []);
-              setAsks(data.data.asks || []);
-              
-              // Handle order cancellations
-              if (data.cancelled_order_id) {
-                console.log(`Processing order cancellation: ${data.cancelled_order_id}`);
-                setClientOrders(prevOrders => {
-                  const newOrders = prevOrders.filter(order => order.order_id !== data.cancelled_order_id);
-                  console.log('Updated client orders after cancellation:', newOrders);
-                  return newOrders;
-                });
-              }
-              
-              // Handle trades
-              if (data.trades && data.trades.length > 0) {
-                console.log('Processing trades:', data.trades); // data.trades is now Array[Trade]
-                // Store the structured trades directly
-                setLastTrades(prevTrades => [...data.trades, ...prevTrades].slice(0, 15));
-                
-                data.trades.forEach(trade => { // trade is now a structured object
-                  console.log('Processing structured trade:', trade);
-                  
-                  // --- Update Price History --- 
-                  // Use timestamp and price from the structured trade object
-                  setPriceHistory(prevHistory => {
-                    const newHistory = [...prevHistory, {
-                      timestamp: trade.timestamp, // Use timestamp from trade
-                      price: trade.price,
-                      isTrade: true
-                    }];
-                    console.log('Updated price history with trade:', {
-                      newPrice: trade.price,
-                      historyLength: newHistory.length
-                    });
-                    return newHistory.slice(-MAX_PRICE_HISTORY);
-                  });
-                  
-                  // --- Update Client Orders --- 
-                  // Check if EITHER maker or taker belongs to the current client
-                  setClientOrders(prevOrders => {
-                    console.log('Current client orders:', prevOrders);
-                    const updatedOrders = prevOrders.map(order => {
-                      let involvedOrderId = null;
-                      if (order.client === trade.maker_client && order.order_id === trade.maker_order_id) {
-                        involvedOrderId = trade.maker_order_id;
-                        console.log(`Trade involves current client's MAKER order: ${involvedOrderId}`);
-                      } else if (order.client === trade.taker_client && order.order_id === trade.taker_order_id) {
-                         involvedOrderId = trade.taker_order_id;
-                         console.log(`Trade involves current client's TAKER order: ${involvedOrderId}`);
-                      }
-
-                      if (involvedOrderId !== null) {
-                        const remainingVolume = order.volume - trade.volume;
-                        if (remainingVolume > 0) {
-                          console.log(`Order ${involvedOrderId} partially filled. Remaining volume: ${remainingVolume}`);
-                          toast.info(`Your Order ${involvedOrderId} partially filled: ${trade.volume} @ ${trade.price.toFixed(2)}`);
-                          return { ...order, volume: remainingVolume };
-                        } else {
-                          console.log(`Order ${involvedOrderId} fully filled`);
-                          toast.success(`Your Order ${involvedOrderId} fully filled: ${trade.volume} @ ${trade.price.toFixed(2)}`);
-                          return null; // Mark for removal
-                        }
-                      }
-                      return order; // Order not involved in this trade
-                    }).filter(Boolean); // Remove null entries (fully filled orders)
-                    
-                    console.log('Updated client orders after trade:', updatedOrders);
-                    return updatedOrders;
-                  });
-                });
-              }
+            // --- Process based on message type ---
+            if (messageData.type === 'pong') {
+                // Handle pong if necessary (e.g., update last pong time)
+                // console.log('Pong received');
+                return; // Nothing else to do for pong
             }
+
+            if (messageData.type === 'connection_established') {
+                console.log('Processing connection_established message');
+                const initialState = messageData.initial_state || {};
+                // Set initial state from connection message
+                setBids(initialState.bids || []);
+                setAsks(initialState.asks || []);
+                // Potentially fetch history or other initial data here if needed
+                setIsLoading(false); // Mark loading as complete
+                return; // Processed connection message
+            }
+
+
+            if (messageData.type === 'order_book_update') {
+              console.log('Processing order book update');
+
+              // Process other state updates first (these might also need functional updates if they depend on prev state)
+              let nextBids = messageData.data?.bids || bids;
+              let nextAsks = messageData.data?.asks || asks;
+              let nextLastTrades = lastTrades;
+              let nextPriceHistory = priceHistory;
+              const toastsToShow = []; // Collect toasts
+
+              const cancelledId = messageData.cancelled_order_id;
+              const trades = messageData.trades || [];
+
+               // Update non-clientOrders states (can still be batched if simple)
+              if (messageData.data) {
+                  setBids(messageData.data.bids || []);
+                  setAsks(messageData.data.asks || []);
+              }
+              if (trades.length > 0) {
+                 setLastTrades(prev => [...trades, ...prev].slice(0, 15));
+                 setPriceHistory(prev => {
+                     const tradeHistoryPoints = trades.map(trade => ({
+                         timestamp: trade.timestamp,
+                         price: trade.price,
+                         isTrade: true
+                     }));
+                     return [...prev, ...tradeHistoryPoints].slice(-MAX_PRICE_HISTORY);
+                 });
+              }
+
+              // ---> UPDATE clientOrders USING FUNCTIONAL UPDATE FORM <---
+              setClientOrders(prevClientOrders => {
+                console.log('Functional update: Calculating client order updates. Starting prevClientOrders:', prevClientOrders);
+                let ordersAfterUpdates = [...prevClientOrders]; // Start with a mutable copy
+                let newOrderToAdd = null;
+
+                // 0. Check if a new order relevant to this client was placed in this message
+                const placedOrderDetails = messageData.placed_order_details;
+                if (placedOrderDetails && placedOrderDetails.client === currentClient) {
+                    console.log(`Functional update: Received details for newly placed order ${placedOrderDetails.order_id}`);
+                    // Prepare the new order object, but don't add it yet.
+                    // We need to process trades first to see if it gets immediately filled.
+                    newOrderToAdd = {
+                         order_id: placedOrderDetails.order_id,
+                         client: placedOrderDetails.client,
+                         side: placedOrderDetails.side, // Assuming backend sends string 'BUY'/'SELL'
+                         price: placedOrderDetails.price,
+                         volume: placedOrderDetails.volume,
+                         timestamp: placedOrderDetails.timestamp // Assuming backend sends JS timestamp
+                    };
+                }
+
+                // 1. Handle Cancellations first
+                if (cancelledId) {
+                    console.log(`Functional update: Checking cancellation for ${cancelledId}`);
+                    const initialLength = ordersAfterUpdates.length;
+                    ordersAfterUpdates = ordersAfterUpdates.filter(order => order.order_id !== cancelledId);
+                    if (ordersAfterUpdates.length < initialLength) {
+                         console.log(`Functional update: Order ${cancelledId} removed by cancellation.`);
+                         // Find the actual cancelled order from the original list for toast
+                         const cancelledOrder = prevClientOrders.find(o => o.order_id === cancelledId);
+                         if (cancelledOrder) {
+                            toastsToShow.push({ type: 'info', message: `Your Order ${cancelledId} was cancelled.` });
+                         }
+                         // If the newly placed order was the one cancelled, nullify it
+                         if (newOrderToAdd && newOrderToAdd.order_id === cancelledId) {
+                             console.log(`Functional update: Newly placed order ${cancelledId} was immediately cancelled.`);
+                             newOrderToAdd = null;
+                         }
+                    }
+                }
+
+                // 2. Handle Trades (update volume or mark for removal)
+                let filledOrderIds = new Set(); // Keep track of orders fully filled by trades in this message
+                if (trades.length > 0) {
+                    console.log('Functional update: Processing trades:', trades);
+                    ordersAfterUpdates = ordersAfterUpdates.map(order => {
+                        // Find the first trade involving this order (maker or taker)
+                        const fillingTrade = trades.find(trade => {
+                             return (order.client === trade.maker_client && order.order_id === trade.maker_order_id) ||
+                                    (order.client === trade.taker_client && order.order_id === trade.taker_order_id);
+                        });
+
+                        if (fillingTrade) {
+                            const role = (order.client === fillingTrade.maker_client && order.order_id === fillingTrade.maker_order_id) ? 'MAKER' : 'TAKER';
+                            console.log(`Functional update: Trade involves client's ${role} order: ${order.order_id}`);
+                            const remainingVolume = order.volume - fillingTrade.volume;
+                            if (remainingVolume > 0) {
+                                console.log(`Functional update: Order ${order.order_id} partially filled. Remaining: ${remainingVolume}`);
+                                toastsToShow.push({ type: 'info', message: `Your Order ${order.order_id} partially filled: ${fillingTrade.volume} @ ${fillingTrade.price.toFixed(2)}` });
+                                return { ...order, volume: remainingVolume }; // Update volume
+                            } else {
+                                console.log(`Functional update: Order ${order.order_id} fully filled by trade.`);
+                                toastsToShow.push({ type: 'success', message: `Your Order ${order.order_id} fully filled: ${fillingTrade.volume} @ ${fillingTrade.price.toFixed(2)}` });
+                                filledOrderIds.add(order.order_id); // Mark as filled
+                                return null; // Mark for removal later
+                            }
+                        }
+                        return order; // No trade involves this order
+                    }).filter(Boolean); // Remove null entries (orders fully filled by existing trades)
+
+                     // Check if the *newly placed* order was immediately filled
+                     if (newOrderToAdd) {
+                        const fillingTradeForNewOrder = trades.find(trade => {
+                            // The new order could only be the taker in the trade it caused
+                            return (newOrderToAdd.client === trade.taker_client && newOrderToAdd.order_id === trade.taker_order_id);
+                        });
+                         if (fillingTradeForNewOrder) {
+                              const remainingVolume = newOrderToAdd.volume - fillingTradeForNewOrder.volume;
+                              if (remainingVolume <= 0) {
+                                  console.log(`Functional update: Newly placed order ${newOrderToAdd.order_id} was immediately fully filled.`);
+                                  filledOrderIds.add(newOrderToAdd.order_id); // Mark as filled
+                                  toastsToShow.push({ type: 'success', message: `Your Order ${newOrderToAdd.order_id} fully filled: ${fillingTradeForNewOrder.volume} @ ${fillingTradeForNewOrder.price.toFixed(2)}` });
+                                  newOrderToAdd = null; // Don't add it if it was immediately filled
+                              } else {
+                                   console.log(`Functional update: Newly placed order ${newOrderToAdd.order_id} was immediately partially filled. Remaining: ${remainingVolume}`);
+                                   // Update the volume of the order we plan to add
+                                   newOrderToAdd.volume = remainingVolume;
+                                    toastsToShow.push({ type: 'info', message: `Your Order ${newOrderToAdd.order_id} partially filled: ${fillingTradeForNewOrder.volume} @ ${fillingTradeForNewOrder.price.toFixed(2)}` });
+                              }
+                         }
+                     }
+                }
+
+                // 3. Add the new order if it exists and wasn't filled/cancelled
+                if (newOrderToAdd) {
+                    // Check if it already exists (e.g., edge case from rapid reconnect/message duplication)
+                    if (!ordersAfterUpdates.some(o => o.order_id === newOrderToAdd.order_id)) {
+                         console.log(`Functional update: Adding new order ${newOrderToAdd.order_id} to client list.`);
+                         ordersAfterUpdates.push(newOrderToAdd);
+                         // Sort orders maybe? By timestamp or ID?
+                         ordersAfterUpdates.sort((a, b) => a.timestamp - b.timestamp); // Example sort by time
+                    } else {
+                         console.log(`Functional update: New order ${newOrderToAdd.order_id} already exists, not adding again.`);
+                    }
+                }
+
+
+                console.log('Functional update: Resulting client orders:', ordersAfterUpdates);
+                // Avoid setting state if the final array is identical to the previous one
+                if (ordersAfterUpdates.length === prevClientOrders.length && ordersAfterUpdates.every((order, i) => {
+                     // Deep comparison might be needed if order objects change internally (e.g., volume)
+                     return order.order_id === prevClientOrders[i]?.order_id && order.volume === prevClientOrders[i]?.volume;
+                 })) {
+                    console.log('Functional update: No effective changes detected, skipping state update.');
+                    // Trigger toasts even if state doesn't change
+                     toastsToShow.forEach(t => toast[t.type](t.message));
+                    return prevClientOrders;
+                }
+
+                 // Trigger toasts just before returning the new state
+                 toastsToShow.forEach(t => toast[t.type](t.message));
+                return ordersAfterUpdates; // Return the new state
+              });
+
+            } else {
+               console.warn("Received unhandled WebSocket message type:", messageData.type);
+            }
+
           } catch (e) {
             console.error("Error processing WebSocket message:", e);
           }
@@ -357,16 +459,47 @@ function App() {
       }
 
       console.log("App received order result:", result);
-      // Add the new order to clientOrders
+      // --- REMOVED --- 
+      // Do NOT update clientOrders state from the API response.
+      // The WebSocket message is the source of truth for active orders.
+      /*
       if (result.order_id) {
-        setClientOrders(prevOrders => [...prevOrders, {
-          order_id: result.order_id,
-          client: client,
-          side: sideInt === 1 ? 'BUY' : 'SELL',
-          price: price,
-          volume: volume
-        }]);
+        const newOrder = {
+            order_id: result.order_id,
+            client: client, // Use the submitted client
+            side: sideInt === 1 ? 'BUY' : 'SELL', // Use the submitted side
+            price: price, // Use the submitted price
+            volume: volume, // Use the submitted volume
+            status: 'active' // Mark as active immediately
+        };
+        console.log('Adding/Updating order in clientOrders via HTTP response:', newOrder);
+        setClientOrders(prevOrders => {
+            // Check if order already exists (e.g., from a rapid WS update - less likely now)
+            const existingOrderIndex = prevOrders.findIndex(o => o.order_id === newOrder.order_id);
+            let updated;
+            if (existingOrderIndex !== -1) {
+                // If it exists, update it (though this scenario is less likely to be needed now)
+                console.log(`Order ${newOrder.order_id} already exists, updating.`);
+                updated = [...prevOrders];
+                updated[existingOrderIndex] = newOrder;
+            } else {
+                // Otherwise, add the new order
+                 console.log(`Adding new order ${newOrder.order_id}.`);
+                updated = [...prevOrders, newOrder];
+            }
+             console.log('New clientOrders state after HTTP update:', updated);
+            return updated;
+        });
       }
+      */
+      // Optionally, show a success toast based on the API result
+      if (result.message) {
+          toast.success(result.message);
+      }
+      if (result.trades_executed && result.trades_executed.length > 0) {
+          toast.info(`${result.trades_executed.length} trade(s) executed immediately.`);
+      }
+      
       return result;
     } catch (e) {
       console.error("Error submitting order:", e);

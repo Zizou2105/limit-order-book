@@ -133,10 +133,26 @@ async def simple_order_generator():
             snapshot = lob.get_order_book_snapshot(levels=15)
             broadcast_message = {
                 "type": "order_book_update",
-                "data": snapshot
+                "data": snapshot,
+                "trades": trades if trades else [] # Ensure trades key is always present
             }
-            if trades: # Add trades to the SAME message if they exist
-                broadcast_message["trades"] = trades
+            # Fetch placed order details if ID exists
+            placed_order = lob.order_map.get(order_id)
+            if placed_order:
+                 broadcast_message["placed_order_details"] = {
+                    "order_id": placed_order.order_id,
+                    "client": placed_order.client,
+                    "side": placed_order.side.name, # Send side as string (BUY/SELL)
+                    "price": placed_order.price,
+                    "volume": placed_order.volume,
+                    "timestamp": placed_order.timestamp.timestamp() * 1000 # JS Timestamp ms
+                 }
+                 logger.info(f"SimpleGen Including placed_order_details for {order_id} in broadcast.")
+            else:
+                 logger.warning(f"SimpleGen Could not find placed order {order_id} to include details in broadcast.")
+            
+            # No longer need the conditional add, just log if trades exist
+            if trades:
                 logger.info(f"SimpleGen Including {len(trades)} trades in broadcast.")
             
             await ws_manager.broadcast(broadcast_message)
@@ -287,14 +303,30 @@ async def create_order(order_request: OrderRequest):
         # Get updated order book snapshot
         snapshot = lob.get_order_book_snapshot(levels=15)
         logger.info(f"Order book snapshot after order placement: {snapshot}")
-        
-        # Broadcast order book update
-        await ws_manager.broadcast({
+
+        # --- Prepare broadcast data ---
+        broadcast_data = {
             "type": "order_book_update",
             "data": snapshot,
-            "order_id": new_order_id,
-            "trades": trades
-        })
+            "trades": trades if trades else [] # Ensure trades key is always present
+        }
+        # Fetch placed order details if ID exists
+        placed_order = lob.order_map.get(new_order_id)
+        if placed_order:
+            broadcast_data["placed_order_details"] = {
+                "order_id": placed_order.order_id,
+                "client": placed_order.client,
+                "side": placed_order.side.name, # Send side as string (BUY/SELL)
+                "price": placed_order.price,
+                "volume": placed_order.volume,
+                "timestamp": placed_order.timestamp.timestamp() * 1000 # JS Timestamp ms
+            }
+            logger.info(f"Including placed_order_details for {new_order_id} in broadcast.")
+        else:
+             logger.warning(f"Could not find placed order {new_order_id} to include details in broadcast.")
+        
+        # Broadcast order book update
+        await ws_manager.broadcast(broadcast_data)
         
         return PlaceOrderResponse(
             message="Order received and processed.",
